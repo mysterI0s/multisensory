@@ -1,5 +1,6 @@
-import tensorflow as tf, aolib.util as ut, numpy as np, os, aolib.img as ig, time, sys
-import tensorflow.contrib.slim as slim
+import tensorflow.compat.v1 as tf, aolib.util as ut, numpy as np, os, aolib.img as ig, time, sys
+tf.disable_v2_behavior()
+import tf_slim as slim
 
 ab = os.path.abspath
 pj = ut.pjoin
@@ -65,10 +66,10 @@ def average_grads(tower_grads):
     for g, v in grad_and_vars:
       #print g, v.name
       if g is None:
-        print 'skipping', v.name
+        print('skipping', v.name)
         continue
       else:
-        print 'averaging', v.name
+        print('averaging', v.name)
       expanded_g = tf.expand_dims(g, 0)
       grads.append(expanded_g)
     if len(grads) == 0:
@@ -134,7 +135,7 @@ def mdn_loss_indep(mix, mu, log_sigma_sq, x, b, nc, k, nx, smooth = None, mean_l
   #                                  'lsq = ', log_sigma_sq, 'log_mix_prob =', log_mix_prob,
   #                                  'mix sum = ', tf.reduce_sum(mix, reduction_indices = 1),
   #                                  'log probs = ', log_probs, tf.shape(log_probs)], summarize = 10)
-  print 'log_probs shape =', shape(log_probs)
+  print('log_probs shape =', shape(log_probs))
   combine_dims = (lambda x : tf.reduce_mean(x, 2)) \
                  if mean_dim else (lambda x : tf.reduce_sum(x, 2))
   if mean_loss:
@@ -163,7 +164,7 @@ def make_mdn_indep(fc, conv_target, pr, scope, use_gpu = True, mean_loss = True,
   mix = multi_softmax(mix, axis = 1)
 
   if pr.mix_only:
-    print 'Not doing mixture regression'
+    print('Not doing mixture regression')
     fc_regress = tf.zeros(fc.get_shape(), dtype = 'float32')
   else:
     fc_regress = fc
@@ -175,7 +176,7 @@ def make_mdn_indep(fc, conv_target, pr, scope, use_gpu = True, mean_loss = True,
     log_sigma_sq = tf.maximum(log_sigma_sq, np.log(0.001))
     log_sigma_sq = tf.reshape(log_sigma_sq, (batch_size, nc, dim))
   else:
-    print 'not using stdev'
+    print('not using stdev')
     log_sigma_sq = tf.log(tf.ones((batch_size, nc, dim), dtype = tf.float32)**2)
 
   if pr.mix_only:
@@ -222,7 +223,8 @@ class Loss:
     #self.losses_smoothed.append(self.ema.apply
     self.loss_names.append(name)
 
-  def add_loss_acc(self, (loss, acc), base_name, summary = False):
+  def add_loss_acc(self, _tuple_arg, base_name, summary = False):
+    loss, acc = _tuple_arg
     acc = tf.stop_gradient(acc)
     acc.ignore = True
     self.add_loss(loss, 'loss:%s' % base_name)
@@ -232,9 +234,9 @@ class Loss:
     if self.total_loss_ is None:
       #print 'Adding:', ' '.join([x.name for x in self.losses if not ut.haseq(x, 'ignore', True)])
       #print 'Skipping:', ' '.join([x.name for x in self.losses if ut.haseq(x, 'ignore', True)])
-      print 'adding:'
+      print('adding:')
       for x in [x for x in self.losses if not ut.haseq(x, 'ignore', True)]:
-        print x
+        print(x)
       self.total_loss_ = maybe_add_n([x for x in self.losses if not ut.haseq(x, 'ignore', True)])
     # with tf.device('/cpu:0'):
     #   self.total_loss_  = tf.Print(self.total_loss_, ['loss0 =', self.losses[0]])
@@ -257,7 +259,7 @@ class Loss:
 def merge_losses(losses):
   loss0 = losses[0]
   merged = Loss(loss0.base_name, loss0.prefix)
-  for i in xrange(len(loss0.losses)):
+  for i in range(len(loss0.losses)):
     name = loss0.loss_names[i]
     assert all(name == x.loss_names[i] for x in losses)
     merged.loss_names.append(name)
@@ -271,11 +273,11 @@ def print_minmax(name, x):
   return tf.Print(x, [name, 'min =', tf.reduce_min(x), 'max =', tf.reduce_max(x)])
 
 def find_model_file(pr):
-  print pr.train_dir
+  print(pr.train_dir)
   return tf.train.latest_checkpoint(pr.train_dir)
 
 def get_step():
-  print 'vars =', [x.name for x in tf.global_variables()]
+  print('vars =', [x.name for x in tf.global_variables()])
   step = ut.find_first(lambda x : x.name.startswith('global_step:'),
                        tf.global_variables())
   return step
@@ -377,7 +379,7 @@ def run_every(num_iters, fn, args):
     return args[0]
 
 def expand_many(x, dims):
-  for i in xrange(len(dims)):
+  for i in range(len(dims)):
     x = tf.expand_dims(x, dims[i])
   return x
 

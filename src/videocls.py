@@ -1,9 +1,10 @@
 # Example code for fine-tuning our audio-visual network to solve an
 # action-recognition task.  We suggest rewriting this code, reusing
 # only the parts that are relevant to your application.
-import tfutil as tfu, aolib.util as ut, tensorflow as tf
+import tfutil as tfu, aolib.util as ut, tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 import shift_net as shift
-import tensorflow.contrib.slim as slim
+import tf_slim as slim
 
 ed = tf.expand_dims
 shape = tfu.shape
@@ -80,14 +81,14 @@ def read_data(pr, gpus):
         num_db_files = pr.num_dbs))
     
     inputs = {'ims' : ims, 'samples' : samples, 'label' : labels}
-    splits = [{} for x in xrange(len(gpus))]      
+    splits = [{} for x in range(len(gpus))]      
     for k, v in inputs.items():
       if v is None:
-        for i in xrange(len(gpus)):
+        for i in range(len(gpus)):
           splits[i][k] = None
       else:
         s = tf.split(v, len(gpus))
-        for i in xrange(len(gpus)):
+        for i in range(len(gpus)):
           splits[i][k] = s[i]
 
     return splits
@@ -188,9 +189,9 @@ class Model:
       tf.train.start_queue_runners(sess = self.sess, coord = self.coord)
 
       self.merged_summary = tf.summary.merge_all()
-      print 'Tensorboard command:'
+      print('Tensorboard command:')
       summary_dir = ut.mkdir(pj(pr.summary_dir, ut.simple_timestamp()))
-      print 'tensorboard --logdir=%s' % summary_dir
+      print('tensorboard --logdir=%s' % summary_dir)
       self.sum_writer = tf.summary.FileWriter(summary_dir, self.sess.graph)
 
       if self.profile:
@@ -199,7 +200,7 @@ class Model:
   def make_test_model(self):
     with tf.device(self.default_gpu):
       pr = self.pr
-      print 'test variable frame count'
+      print('test variable frame count')
       if 0 and pr.variable_frame_count:
         self.test_ims_ph = tf.placeholder(tf.uint8, [1, None, pr.crop_im_dim, pr.crop_im_dim, 3])
         self.test_samples_ph = tf.placeholder(tf.float32, [1, None, 2])
@@ -219,34 +220,34 @@ class Model:
   def checkpoint_fast(self):
     check_path = pj(ut.mkdir(self.pr.train_dir), 'net.tf')
     out = self.saver_fast.save(self.sess, check_path, global_step = self.step)
-    print 'Checkpoint:', out
+    print('Checkpoint:', out)
 
   def checkpoint_slow(self):
     check_path = pj(ut.mkdir(pj(self.pr.train_dir, 'slow')), 'net.tf')
     out = self.saver_slow.save(self.sess, check_path, global_step = self.step)
-    print 'Checkpoint:', out
+    print('Checkpoint:', out)
 
   #def restore(self, path = None, restore_opt = True, ul_only = False):
   def restore(self, path = None, restore_opt = True, ul_only = False):
     if path is None:
       path = tf.train.latest_checkpoint(self.pr.train_dir)      
-    print 'Restoring:', path
+    print('Restoring:', path)
     var_list = slim.get_variables_to_restore()
     for x in var_list:
-      print x.name
-    print
+      print(x.name)
+    print()
     var_list = slim.get_variables_to_restore()
     if not restore_opt:
       opt_names = ['Adam', 'beta1_power', 'beta2_power', 'Momentum'] + ['cls']# + ['renorm_mean_weight', 'renorm_stddev_weight', 'moving_mean', 'renorm']
-      print 'removing bn gamma'
+      print('removing bn gamma')
       opt_names += ['gamma']
       var_list = [x for x in var_list if not any(name in x.name for name in opt_names)]
     if ul_only:
       var_list = [x for x in var_list if not x.name.startswith('lb/') and ('global_step' not in x.name)]
     #var_list = [x for x in var_list if ('global_step' not in x.name)]
-    print 'Restoring variables:'
+    print('Restoring variables:')
     for x in var_list:
-      print x.name
+      print(x.name)
     tf.train.Saver(var_list).restore(self.sess, path)
     # print 'TEST: restoring all'
     # tf.train.Saver().restore(self.sess, path)
@@ -284,7 +285,7 @@ class Model:
       out = ' '.join(out)
 
       if step < 10 or step % pr.print_iters == 0:
-        print 'Iteration %d, lr = %.0e, %s, time: %.3f' % (step, lr, out, ts)
+        print('Iteration %d, lr = %.0e, %s, time: %.3f' % (step, lr, out, ts))
       i += 1
 
 def moving_avg(name, x, vals, avg_win_size = 100, p = 0.99):
@@ -293,7 +294,7 @@ def moving_avg(name, x, vals, avg_win_size = 100, p = 0.99):
 
 def train(pr, gpus, restore = False, restore_opt = True, 
           num_gpus = None, profile = False):
-  print pr
+  print(pr)
   gpus = tfu.set_gpus(gpus)
   with tf.Graph().as_default():
     config = tf.ConfigProto(allow_soft_placement = True)
@@ -311,7 +312,7 @@ def train(pr, gpus, restore = False, restore_opt = True,
         rgb_variable_map = {}
         for variable in tf.global_variables():
           if any(x in variable.name for x in opt_names):
-            print 'Skipping:', variable.name
+            print('Skipping:', variable.name)
             continue
           if pr.init_from_2d:
             if variable.name.split('/')[0] == 'RGB':
@@ -324,7 +325,7 @@ def train(pr, gpus, restore = False, restore_opt = True,
                 .replace('batch_norm', 'BatchNorm')
                 .replace('conv_3d/w', 'weights')
                 .replace(':0', ''))
-              print 'shape of', variable.name, shape(variable)
+              print('shape of', variable.name, shape(variable))
               v = tf.get_variable(cp_name, shape(variable)[1:], tf.float32)
               #rgb_variable_map[cp_name] = variable
               rgb_variable_map[cp_name] = v
@@ -336,10 +337,10 @@ def train(pr, gpus, restore = False, restore_opt = True,
         rgb_saver = tf.train.Saver(var_list=rgb_variable_map, reshape=True)
         rgb_saver.restore(sess, pr.init_path)
         for x in init_ops:
-          print 'Running:', x
+          print('Running:', x)
           sess.run(x)
       else:
-        print 'Restoring from init_path:', pr.init_path
+        print('Restoring from init_path:', pr.init_path)
         model.restore(pr.init_path, ul_only = True, restore_opt = False)
 
     tf.get_default_graph().finalize()

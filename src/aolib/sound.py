@@ -405,7 +405,7 @@ def play(samples_or_snd, sr = None, compress = True):
   os.system('chmod a+rwx %s' % fname)
   #url = ut.pjoin(imtable.PUBLIC_URL, 'sounds', os.path.split(fname)[1])
   url = ut.pjoin(imtable.get_url(), 'sounds', os.path.split(fname)[1])
-  print url
+  print(url)
   return url
 
 class LongWav:
@@ -448,7 +448,8 @@ class LongWav:
 
   st = sample_from_time
 
-def resample_snd((snd, sr)):
+def resample_snd(args):
+  snd, sr = args
   return snd.resampled(sr)
 
 def concat_sounds(snds, par = 1):
@@ -487,7 +488,7 @@ def convert_sound_compat(in_fname, out_fname, duration = None, rate = None, code
     ok = ok and (0 == os.system('ffmpeg -i "%s" -y -ac 1 -acodec %s %s "%s"' % (mp3_tmp, codec, ar_str, wav_tmp)))
     if ok:
       load_sound(wav_tmp).save(out_fname)
-    print 'writing', out_fname, ok
+    print('writing', out_fname, ok)
     #ok = ok and (0 == ut.sys_print('ffmpeg -i "%s" -y -f s16le -acodec pcm_s16le -ac 1 "%s"' % (tmp_file, out_fname)))
   return ok
 

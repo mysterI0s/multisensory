@@ -1,6 +1,8 @@
- #import numpy as np, tfutil as mu, aolib.util as ut, copy, shift_dset, tensorflow as tf
-import numpy as np, tfutil as mu, aolib.util as ut, copy, shift_dset, tensorflow as tf
-import tensorflow.contrib.slim as slim
+#import numpy as np, tfutil as mu, aolib.util as ut, copy, shift_dset, tensorflow.compat.v1 as tf
+# tf.disable_v2_behavior()
+import numpy as np, tfutil as mu, aolib.util as ut, copy, shift_dset, tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+import tf_slim as slim
 
 ed = tf.expand_dims
 shape = mu.shape
@@ -19,14 +21,14 @@ def read_data(pr, gpus):
         num_db_files = pr.num_dbs))
     
     inputs = {'ims' : ims, 'samples' : samples}
-    splits = [{} for x in xrange(len(gpus))]   
+    splits = [{} for x in range(len(gpus))]   
     for k, v in inputs.items():
       if v is None:
-        for i in xrange(len(gpus)):
+        for i in range(len(gpus)):
           splits[i][k] = None
       else:
         s = tf.split(v, len(gpus))
-        for i in xrange(len(gpus)):
+        for i in range(len(gpus)):
           splits[i][k] = s[i]
     return splits
 
@@ -38,9 +40,9 @@ def arg_scope_3d(pr,
               train = True,
               center = True):
   scale = ut.hastrue(pr, 'bn_scale')
-  print 'bn scale:', scale
+  print('bn scale:', scale)
   weight_decay = pr.weight_decay
-  print 'arg_scope train =', train
+  print('arg_scope train =', train)
   bn_prs = {
     'decay': 0.9997,
     'epsilon': 0.001,
@@ -71,9 +73,9 @@ def arg_scope_2d(pr,
               train = True,
               center = True):
   scale = ut.hastrue(pr, 'bn_scale')
-  print 'bn scale:', scale
+  print('bn scale:', scale)
   weight_decay = pr.weight_decay
-  print 'arg_scope train =', train
+  print('arg_scope train =', train)
   bn_prs = {
     'decay': 0.9997,
     'epsilon': 0.001,
@@ -101,7 +103,7 @@ def arg_scope_2d(pr,
  
 def conv3d(*args, **kwargs):
   out = slim.convolution(*args, **kwargs)
-  print kwargs['scope'], '->', shape(out), 'before:', shape(args[0])
+  print(kwargs['scope'], '->', shape(out), 'before:', shape(args[0]))
   if 0:
     out = tf.Print(out, [kwargs['scope'],
                          tf.reduce_mean(out, [0,1,2,3]),
@@ -110,7 +112,7 @@ def conv3d(*args, **kwargs):
 
 def conv2d(*args, **kwargs):
   out = slim.conv2d(*args, **kwargs)
-  print kwargs['scope'], '->', shape(out)
+  print(kwargs['scope'], '->', shape(out))
   return out
 
 def make_opt(opt_method, lr_val, pr):
@@ -135,7 +137,7 @@ def pool3d(x, dim, stride, padding = 'SAME'):
     x, ksize = [1] + list(dim) + [1],
     strides = [1] + list(stride) + [1], 
     padding = padding)
-  print 'pool ->', shape(x)
+  print('pool ->', shape(x))
   return x
 
 def sigmoid_loss(logits, labels):
@@ -151,10 +153,10 @@ def slim_losses_with_prefix(prefix, show = True):
   losses = tf.losses.get_regularization_losses()
   losses = [x for x in losses if prefix is None or x.name.startswith(prefix)]
   if show:
-    print 'Collecting losses for prefix %s:' % prefix
+    print('Collecting losses for prefix %s:' % prefix)
     for x in losses:
-      print x.name
-    print
+      print(x.name)
+    print()
   return mu.maybe_add_n(losses)
 
 class Model:
@@ -222,8 +224,8 @@ class Model:
         #pr_test = pr.copy()
         pr_test = self.pr_test.copy()
         pr_test.augment_ims = False
-        print 'pr_test ='
-        print pr_test
+        print('pr_test =')
+        print(pr_test)
 
         self.test_ims, self.test_samples, self.test_ytids = mu.on_cpu(
           lambda : shift_dset.make_db_reader(
@@ -235,7 +237,7 @@ class Model:
         else:
           self.test_labels = tf.ones(shape(self.test_ims, 0), dtype = tf.int64)
           #self.test_samples = tf.where(tf.equal(self.test_labels, 1), self.test_samples[:, 1], self.test_samples[:, 0])
-          print 'sample shape:', shape(self.test_samples)
+          print('sample shape:', shape(self.test_samples))
 
         self.test_net = make_net(self.test_ims, self.test_samples, pr_test, reuse = True, train = self.is_training)
 
@@ -247,7 +249,7 @@ class Model:
 
       bn_ups = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
       if pr.multipass:
-        ops = [opt.apply_gradients(gvs, global_step = self.step) for i in xrange(pr.multipass_count)]
+        ops = [opt.apply_gradients(gvs, global_step = self.step) for i in range(pr.multipass_count)]
         def op_helper(count = [0]):
           op = ops[count[0] % len(ops)]
           count[0] += 1
@@ -265,20 +267,20 @@ class Model:
       tf.train.start_queue_runners(sess = self.sess, coord = self.coord)
 
       self.merged_summary = tf.summary.merge_all()
-      print 'Tensorboard command:'
+      print('Tensorboard command:')
       summary_dir = ut.mkdir(pj(pr.summary_dir, ut.simple_timestamp()))
-      print 'tensorboard --logdir=%s' % summary_dir
+      print('tensorboard --logdir=%s' % summary_dir)
       self.sum_writer = tf.summary.FileWriter(summary_dir, self.sess.graph)
 
   def checkpoint(self):
     check_path = pj(ut.mkdir(self.pr.train_dir), 'net.tf')
     out = self.saver.save(self.sess, check_path, global_step = self.step)
-    print 'Checkpoint:', out
+    print('Checkpoint:', out)
 
   def restore(self, path = None, restore_opt = True, restore_resnet18_blocks = True, restore_dilation_blocks = True):
     if path is None:
       path = tf.train.latest_checkpoint(self.pr.train_dir)      
-    print 'Restoring from:', path
+    print('Restoring from:', path)
     var_list = slim.get_variables_to_restore()
     opt_names = ['Adam', 'beta1_power', 'beta2_power', 'Momentum', 'cache']
     if not restore_resnet18_blocks:
@@ -287,10 +289,10 @@ class Model:
     if not restore_opt:
       var_list = [x for x in var_list if not any(name in x.name for name in opt_names)]
 
-    print 'Restoring:'
+    print('Restoring:')
     for x in var_list:
-      print x.name
-    print
+      print(x.name)
+    print()
     tf.train.Saver(var_list).restore(self.sess, path)
 
   def get_step(self):
@@ -321,7 +323,7 @@ class Model:
       out = ' '.join(out)
 
       if step < 10 or step % pr.print_iters == 0:
-        print 'Iteration %d, lr = %.0e, %s, time: %.3f' % (step, lr, out, ts)
+        print('Iteration %d, lr = %.0e, %s, time: %.3f' % (step, lr, out, ts))
 
       first = False
 
@@ -330,7 +332,7 @@ def moving_avg(name, x, vals, avg_win_size = 100, p = 0.99):
   return vals[name]
 
 def train(pr, gpus, restore = False, restore_opt = True):
-  print pr
+  print(pr)
   gpus = mu.set_gpus(gpus)
   with tf.Graph().as_default():
     config = tf.ConfigProto(allow_soft_placement = True)
@@ -392,10 +394,10 @@ def normalize_sfs(sfs, scale = 255.):
 def my_fractional_pool(net, frac, n):
   net = tf.nn.max_pool(net, [1, int(round(frac)), 1, 1], [1, 1, 1, 1], 'SAME')
   #return tf.image.resize_nearest_neighbor(net, [n, tf.shape(net)[1]])
-  print 'shape =', shape(net)
+  print('shape =', shape(net))
   s = shape(net)
   net = tf.image.resize_nearest_neighbor(net, [n, 1])
-  print 'shape after resize =', shape(net)
+  print('shape after resize =', shape(net))
   net.set_shape((s[0], None, s[2], s[3]))
   return net
 
@@ -403,7 +405,7 @@ def my_fractional_pool(net, frac, n):
 def merge(sf_net, im_net, pr, reuse = None, train = True):
   # fuse image and sound feature nets
   s0 = shape(sf_net)
-  print 'frac:', float(shape(sf_net, 1)-1)/shape(im_net, 1)
+  print('frac:', float(shape(sf_net, 1)-1)/shape(im_net, 1))
   if train:
     sf_net = tf.nn.fractional_max_pool(sf_net, [1, float(shape(sf_net, 1)-1)/shape(im_net, 1), 1, 1])[0]
   else:
@@ -421,10 +423,10 @@ def merge(sf_net, im_net, pr, reuse = None, train = True):
     sf_net = ed(ed(sf_net, 2), 2)
     sf_net = tf.tile(sf_net, [1, 1, shape(im_net, 2), shape(im_net, 3), 1])
     if not pr.use_sound:
-      print 'Not using sound!'
+      print('Not using sound!')
       sf_net = tf.zeros_like(sf_net)
     net = tf.concat([im_net, sf_net], 4)
-    print 'sf_net shape before merge: %s, and after merge: %s' % (s0, s1)
+    print('sf_net shape before merge: %s, and after merge: %s' % (s0, s1))
 
     short = tf.concat([net[..., :64], net[..., -64:]], 4)
     net = conv3d(net, 512, [1, 1, 1], scope = 'im/merge1')
@@ -478,7 +480,7 @@ def make_net(ims, sfs, pr, im_net = None, reuse = True, train = True):
     im_scales.append(net)
 
     time_stride = (2 if ut.hastrue(pr, 'extra_stride') else 1)
-    print 'time_stride =', time_stride
+    print('time_stride =', time_stride)
     s = (1 if pr.cam else 2)
     net = block3(net, 512, [3, 3, 3], 'im/conv5_1', stride = [time_stride, s, s], reuse = reuse)
     net = block3(net, 512, [3, 3, 3], 'im/conv5_2', stride = 1, reuse = reuse)
@@ -512,7 +514,7 @@ class NetClf:
 
   def init(self, reset = True):
     if self.sess is None:
-      print 'Running on:', self.gpu
+      print('Running on:', self.gpu)
       with tf.device(self.gpu):
         if reset:
           tf.reset_default_graph()

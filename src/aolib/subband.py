@@ -19,7 +19,7 @@ def erb_filters(length, sr, nbands, low_lim, hi_lim):
   
   cos_filts = np.zeros((nfreqs, nbands))
   cutoffs = erb2freq(np.linspace(freq2erb(low_lim), freq2erb(hi_lim), 2 + nbands))
-  for k in xrange(nbands):
+  for k in range(nbands):
     # adjacent filters overlap by 50%
     l = cutoffs[k]
     h = cutoffs[k+2]
@@ -89,7 +89,7 @@ def resample(signal, sc, clip = True, num_samples = None):
 
 def resample_sound(signal, sc, clip = True, num_samples = None):
   n = int(round(signal.shape[0] * sc)) if num_samples is None else num_samples
-  print 'resampling', signal.shape[0], n
+  print('resampling', signal.shape[0], n)
   r = scipy.signal.resample(signal, n)
   if clip:
     r = np.clip(r, -1, 1)
@@ -123,7 +123,7 @@ def good_resample_length(n, new_sr, old_sr, factor2 = 100):
 
 # def good_resample_length(n, new_sr, old_sr, factor2 = 100):
 #   factor = new_sr / float(old_sr)
-#   for i in xrange(1+factor2):
+#   for i in range(1+factor2):
 #     nn = (n - i)
 #     #new_len = int(np.floor(nn / factor) * factor)
 #     new_len = int(round(nn * factor))
@@ -208,7 +208,7 @@ def invert_subband_envs(target_envs, final_sr, env_sr, mid_sr = 20000, niters = 
   filts, _, _ = erb_filters(snd_len, mid_sr, nbands, low_lim, hi_lim)
   #cut_signal(signal, new_sr, old_sr):
   synth_sound = np.random.randn(snd_len)
-  for i in xrange(niters):
+  for i in range(niters):
     # Forward pass: current sound -> downsampled envelopes and full-res phases
     synth_subbands = subbands_from_sound(synth_sound, filts)
     analytic = scipy.signal.hilbert(synth_subbands, axis = 0)
@@ -238,13 +238,13 @@ def invert_noisy_subbands(target_envs, final_sr, env_sr, mid_sr = 20000, low_lim
   filts, _, _ = erb_filters(snd_len, mid_sr, nbands, low_lim, hi_lim)
   synth_sound = np.random.randn(snd_len)
   if 0:
-    print 'using pink noise'
+    print('using pink noise')
     noise_snd = sound.load_sound('/data/vision/billf/aho-stuff/vis/lib/soundtex/pink_noise_20s_20kHz.wav')
     noise_snd = noise_snd.normalized().to_mono()
     noise_snd = noise_snd.samples
     i = np.random.choice(range(noise_snd.shape[0] - synth_sound.shape[0]))
     synth_sound = 100*noise_snd[i : i + synth_sound.shape[0]]
-    print 'stdev', np.std(synth_sound)
+    print('stdev', np.std(synth_sound))
     #sound.play(synth_sound, mid_sr)
 
   # Forward pass: current sound -> downsampled envelopes and full-res phases
@@ -305,7 +305,7 @@ def mod_filters(length, sr, num_mod_channels = 10, low_lim = 0.5, hi_lim = 200.,
   # center frequencies evenly spaced on log scale
   cos_filts = np.zeros((nfreqs, num_mod_channels))
   cfs = 2**np.linspace(np.log2(low_lim), np.log2(hi_lim), num_mod_channels)
-  for k in xrange(num_mod_channels):
+  for k in range(num_mod_channels):
     # increase the width of the filter as a function of frequency
     bw = cfs[k]/q
     l = cfs[k] - bw
@@ -328,7 +328,7 @@ def mod_filters(length, sr, num_mod_channels = 10, low_lim = 0.5, hi_lim = 200.,
 def mod_power(envs, sr):
   filts = mod_filters(envs.shape[0], sr)
   mod_subbands = []
-  for j in xrange(envs.shape[1]):
+  for j in range(envs.shape[1]):
     mod_subbands.append(subbands_from_sound(envs[:, j], filts))
   return np.array(mod_subbands).transpose((1,0,2))
   
@@ -346,7 +346,7 @@ def mod_power(envs, sr):
 
 #   mods = mod_power(envs, sr)
 #   mod_pow_norm = np.zeros(mods.shape[1:])
-#   for j in xrange(envs.shape[1]):
+#   for j in range(envs.shape[1]):
 #     mod_pow_unnorm = np.mean(mods[:, j]**2, axis = 0)
 #     mod_pow_norm[j, :] = np.sqrt(mod_pow_unnorm / env_var_unnorm[j])
 
@@ -373,7 +373,7 @@ def mod_power(envs, sr):
 #   pairs = [1, 2, 3, 5]
 #   num_bands = envs.shape[1]
 #   corrs = []
-#   for i in xrange(num_bands):
+#   for i in range(num_bands):
 #     for j in pairs:
 #       ii = i + j
 #       if ii < num_bands:
@@ -384,7 +384,7 @@ def mod_power(envs, sr):
 
 #   mods = mod_power(envs, sr)
 #   mod_pow_norm = np.zeros(mods.shape[1:])
-#   for j in xrange(num_bands):
+#   for j in range(num_bands):
 #     mod_pow_unnorm = np.mean(mods[:, j]**2, axis = 0)
 #     mod_pow_norm[j, :] = np.sqrt(mod_pow_unnorm / (eps + env_var_unnorm[j]))
 
@@ -415,7 +415,7 @@ def texture_stats(envs, sr, normalize_envs = False):
   pairs = [1, 2, 3, 5]
   num_bands = envs.shape[1]
   corrs = []
-  for i in xrange(num_bands):
+  for i in range(num_bands):
     for j in pairs:
       ii = i + j
       if ii < num_bands:
@@ -426,7 +426,7 @@ def texture_stats(envs, sr, normalize_envs = False):
 
   mods = mod_power(envs, sr)
   mod_pow_norm = np.zeros(mods.shape[1:])
-  for j in xrange(num_bands):
+  for j in range(num_bands):
     mod_pow_unnorm = np.mean(mods[:, j]**2, axis = 0)
     mod_pow_norm[j, :] = np.sqrt(mod_pow_unnorm / (eps + env_var_unnorm[j]))
 

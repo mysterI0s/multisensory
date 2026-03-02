@@ -17,7 +17,7 @@ def reload_all():
   # ability to send reload_all() to my ipython shell after making
   # changes.
   excludes = set(['__main__', 'autoreload'])
-  for name, m in list(sys.modules.iteritems()):
+  for name, m in list(sys.modules.items()):
     # todo: Check source modification time (use os.path.getmtime) to see if it has changed.
     if m and relative_module(m) and (name not in excludes) and (not hasattr(m, '__no_autoreload__')):
       reload(m)
@@ -28,7 +28,7 @@ def ipython_autoreload_hook(self):
     reload_all()
   except:
     traceback.print_exc()
-    print 'Reload error. Modules not reloaded.'
+    print('Reload error. Modules not reloaded.')
 
 def enable():
   try:
@@ -47,7 +47,7 @@ def enable():
       prerun_hook_name = 'pre_runcode_hook'    
       ip = ipapi.get()
   ip.set_hook(prerun_hook_name, ipython_autoreload_hook)
-  print 'autoreload enabled'
+  print('autoreload enabled')
 
 # # taken from ipy_autoreload.py; should probably just use that instead
 # def superreload(module, reload=reload):

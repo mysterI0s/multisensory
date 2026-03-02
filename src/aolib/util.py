@@ -1,5 +1,5 @@
 import time, random, math, numpy, os, sys, tempfile, pylab, subprocess, matplotlib, datetime, \
-       itertools as itl, copy, StringIO, cPickle as pickle, gc, collections, bisect, traceback, multiprocessing
+       itertools as itl, copy, StringIO, pickle as pickle, gc, collections, bisect, traceback, multiprocessing
 import numpy as np
 import img as ig
 import scipy.sparse
@@ -164,7 +164,7 @@ def ident(x): return x
 class Struct:
   def __init__(self, *dicts, **fields):
     for d in dicts:
-      for k, v in d.iteritems():
+      for k, v in d.items():
         setattr(self, k, v)
     self.__dict__.update(fields)
 
@@ -286,7 +286,7 @@ def tic(msg = None, show = True):
   """ start a timer """
   global tic_start_g
   if (msg is not None) and show:
-    print >>sys.stderr, msg
+    print(msg, file=sys.stderr)
   tic_start_g.append((msg, time.time()))
 
 def toc(s = None, show = True):
@@ -294,7 +294,7 @@ def toc(s = None, show = True):
   global tic_start_g
   if len(tic_start_g) == 0:
     if show:
-      print >>sys.stderr, 'toc() called without tic!'
+      print('toc() called without tic!', file=sys.stderr)
     return
   msg, t = tic_start_g.pop()
   elapsed = time.time() - t
@@ -302,9 +302,9 @@ def toc(s = None, show = True):
     msg = s
   if show:
     if msg is not None:
-      print >>sys.stderr, msg, ('%.3f seconds' % elapsed)
+      print(msg, ('%.3f seconds' % elapsed), file=sys.stderr)
     else:
-      print >>sys.stderr, ('%.3f seconds' % elapsed)
+      print(('%.3f seconds' % elapsed), file=sys.stderr)
   return elapsed
 
 def unweighted(graph):
@@ -378,7 +378,7 @@ def dict_f(dict):
 
 def methods(x):
   for m in dir(x):
-    print m
+    print(m)
 
 day_seconds = 24*60*60
 
@@ -485,7 +485,7 @@ def mult(nums):
   if len(nums) == 0:
     raise TypeError('mult() takes 1 argument')
   t = nums[0]
-  for i in xrange(1, len(nums)):
+  for i in range(1, len(nums)):
     t *= nums[i]
   return t
 
@@ -598,18 +598,19 @@ class constant_seed:
 
 def test_constant_seed():
   n = 5
-  #a = [random.randint(0, 1000) for x in xrange(n)]
+  #a = [random.randint(0, 1000) for x in range(n)]
   with constant_seed():
-    a = [random.randint(0, 1000) for x in xrange(n)]
+    a = [random.randint(0, 1000) for x in range(n)]
 
   with constant_seed():
-    b = [random.randint(0, 1000) for x in xrange(n)]
+    b = [random.randint(0, 1000) for x in range(n)]
 
-  c = [random.randint(0, 1000) for x in xrange(n)]
+  c = [random.randint(0, 1000) for x in range(n)]
   assert a == b and c != a
 
 
-def unstash_seed((py_state, np_state)):
+def unstash_seed(args):
+  py_state, np_state = args
   random.setstate(py_state)
   np.random.set_state(np_state)
 
@@ -718,12 +719,12 @@ def normalized(v):
   return v.copy() if n == 0 else v/n
 
 def rect(x1, y1, w, h):
-  return ((x1 + x, y1 + y) for x in xrange(w) for y in xrange(h))
+  return ((x1 + x, y1 + y) for x in range(w) for y in range(h))
 
 def zrect(w, h = None, alias = 1):
   if h is None:
     h = w
-  return ((x, y) for x in xrange(0, w, alias) for y in xrange(0, h, alias))
+  return ((x, y) for x in range(0, w, alias) for y in range(0, h, alias))
 
 def vec(*args):
   return numpy.array(args, dtype = 'd')
@@ -765,7 +766,7 @@ def take_inds(a, inds):
 def remove_inds(a, inds):
   new_a = []
   inds = set(inds)
-  for i in xrange(len(a)):
+  for i in range(len(a)):
     if i not in inds:
       new_a.append(a[i])
   return new_a
@@ -848,7 +849,7 @@ def neighbors(i, j, conn = 4):
     yield (i-1, j+1)
 
 def in_bounds_shape(shape, *inds):
-  return all(0 <= inds[i] < shape[i] for i in xrange(len(inds)))
+  return all(0 <= inds[i] < shape[i] for i in range(len(inds)))
 
 def in_bound_neighbors(a, i, j, conn = 4):
   return [(ii, jj) for ii, jj in neighbors(i, j, conn) if in_bounds2d(a, ii, jj)]
@@ -894,7 +895,7 @@ def shuffled(xs):
   return cp
 
 def prn_sys(cmd):
-  print cmd
+  print(cmd)
   return os.system(cmd)
 
 # def sys(*args):
@@ -910,7 +911,7 @@ def prn_sys(cmd):
 
 def sys_check(*args):
   cmd = ' '.join(args)
-  print cmd
+  print(cmd)
   if 0 != os.system(cmd):
     fail('Command failed! %s' % cmd)
   return 0
@@ -922,7 +923,7 @@ def sys_check_silent(*args):
   return 0
 
 def sys_print(s):
-  print s
+  print(s)
   return os.system(s)
 
 # def homog(x):
@@ -973,7 +974,9 @@ def check(cond, str = 'Check failed!'):
   if not cond:
     fail(str)
 
-def rect_area((x, y, w, h)): return w*h
+def rect_area(bbox):
+  x, y, w, h = bbox
+  return w*h
 
 # def rect_center((x,y,w,h)):
 #   return (x + w/2, y + h/2)
@@ -1053,8 +1056,9 @@ def sorted_by_key(keys, lsts, reverse = False):
     inds = inds[::-1]
   return [take_inds(lst, inds) for lst in lsts]
 
-def crop_rect_to_img((x, y, w, h), im):
+def crop_rect_to_img(bbox, im):
   # redundant and bad code
+  x, y, w, h = bbox
   x1, y1 = x, y
   x2, y2 = x+w-1, y+h-1
   x1 = max(x1, 0)
@@ -1110,13 +1114,14 @@ def center_point(pts):
       best_pt = p1
   return best_pt
 
-def rect_contains_pt((rx, ry, w, h), x, y):
+def rect_contains_pt(_tuple_arg, x, y):
+  rx, ry, w, h = _tuple_arg
   return rx <= x < rx + w and ry <= y < ry + h
 
-def list_of_lists(n): return [[] for x in xrange(n)]
-def list_of_sets(n): return [set() for x in xrange(n)]
-def list_of_dicts(n): return [{} for x in xrange(n)]
-def repf(f, n): return [f() for x in xrange(n)]
+def list_of_lists(n): return [[] for x in range(n)]
+def list_of_sets(n): return [set() for x in range(n)]
+def list_of_dicts(n): return [{} for x in range(n)]
+def repf(f, n): return [f() for x in range(n)]
 
 def argmini(lst):
   least = numpy.inf
@@ -1174,7 +1179,8 @@ def min2(lst):
   return lst[argmini2(lst)]
 
 
-def pad_rect((x, y, w, h), pad):
+def pad_rect(_tuple_arg, pad):
+  x, y, w, h = _tuple_arg
   return (x - pad, y - pad, w+2*pad, h+2*pad)
 
 def num_splits(xs, chunk_size):
@@ -1260,7 +1266,9 @@ def rect_im_intersect(im, rect):
 def rect_shape_intersect(shape, rect):
   return rect_intersect((0, 0, shape[1], shape[0]), rect)
 
-def rect_empty((x, y, w, h)): return w <= 0 or h <= 0
+def rect_empty(bbox): 
+  x, y, w, h = bbox
+  return w <= 0 or h <= 0
 
 def scale_rect(r, s):
   w, h = (r[2]*s, r[3]*s)
@@ -1331,8 +1339,8 @@ def acenter(a):
 inch_in_meters = 0.0254
 
 def iter_axis2(a):
-  for y in xrange(a.shape[0]):
-    for x in xrange(a.shape[1]):
+  for y in range(a.shape[0]):
+    for x in range(a.shape[1]):
       yield a[y, x]
 
 def fun_or_attr(f):
@@ -1354,7 +1362,7 @@ def group_dict(f, vals):
 def group_dict_1to1(f, vals):
   d = group_dict(f, vals)
   new_d = {}
-  for k, v in d.iteritems():
+  for k, v in d.items():
     if len(v) == 1:
       new_d[k] = v[0]
     else:
@@ -1371,7 +1379,7 @@ def dict_many(kvs):
   return d
 
 def dict_map(f, d):
-  return dict((k, f(v)) for k, v in d.iteritems())
+  return dict((k, f(v)) for k, v in d.items())
 
 def normalize_im(a):
   norms = np.sqrt(np.sum(a ** 2, axis = 2))
@@ -1380,7 +1388,7 @@ def normalize_im(a):
   return a / np.tile(norms[:, :, np.newaxis], (1,1,3))
 
 def pr(s):
-  print s
+  print(s)
   return s
 
 def xy_from_angle(a):
@@ -1427,7 +1435,7 @@ class TimeEstimator:
   def update(self, msg_fun = None):
     self.n += 1
     if (not self.count_error) and (self.n > self.total_elements):
-      print >>sys.stderr, "TimeEstimator: Can't estimate time remaining. Invalid element count"
+      print("TimeEstimator: Can't estimate time remaining. Invalid element count", file=sys.stderr)
       self.count_error = True
     elif not self.count_error:
       t = now_sec()
@@ -1445,9 +1453,9 @@ class TimeEstimator:
           rest_msg = 'total time: %s.' % pretty_seconds(elapsed)
         else:
           rest_msg = '%s remaining.' % pretty_seconds(remaining_time)
-        print >>sys.stderr, ('%s%2.1f%% complete, %s %s per iteration. (%s)' \
+        print('%s%2.1f%% complete, %s %s per iteration. (%s)'
                              % (msg, 100*p, rest_msg,
-                                pretty_seconds(per_iter_sec), readable_timestamp()))
+                                pretty_seconds(per_iter_sec), readable_timestamp()), file=sys.stderr)
 class DurationTester:
   def __init__(self, duration):
     self.duration = duration
@@ -1465,16 +1473,16 @@ class DurationTester:
 def test_time_estimator():
   n = 60
   te = TimeEstimator(n, 2, 'test_time_estimator')
-  for x in xrange(n):
+  for x in range(n):
     te.update()
     time.sleep(1)
 
 def test_duration_tester():
   dt = DurationTester(10)
   n = 60
-  for x in xrange(n):
+  for x in range(n):
     if dt.test():
-      print 'yes'
+      print('yes')
     time.sleep(1)
 #def quote(s): return '"%s"' % s
 
@@ -1518,10 +1526,12 @@ def zip_pad(pad, *lsts):
   with_pad = (lst + [pad] * (max_len - len(lst)) for lst in lsts)
   return zip(*with_pad)
 
-def rect_in_bounds(im, (x, y, w, h)):
+def rect_in_bounds(im, _tuple_arg):
+  x, y, w, h = _tuple_arg
   return 0 <= x and 0 <= y and x + w <= im.shape[1] and y + h <= im.shape[0]
 
-def rect_in_bounds_shape(shape, (x, y, w, h)):
+def rect_in_bounds_shape(shape, _tuple_arg):
+  x, y, w, h = _tuple_arg
   return 0 <= x and 0 <= y and x + w <= shape[1] and y + h <= shape[0]
 
 def img_hessian(im):
@@ -1551,7 +1561,7 @@ def remove_keys(d, ks):
 
 def filter_keys(d, ks):
   ks = set(ks)
-  return dict((k, v) for k, v in d.iteritems() if k in ks)
+  return dict((k, v) for k, v in d.items() if k in ks)
 
 def unique_filename(fname):
   if not os.path.exists(fname):
@@ -1585,7 +1595,7 @@ def str_fields(o):
   return "%s:\n%s" % (o, fields)
 
 def print_fields(o):
-  print str_fields(o)
+  print(str_fields(o))
 
 class DictEval:
   def __init__(self, locals = None, globals = None):
@@ -1607,7 +1617,7 @@ def caller_globals():
 
 def vars_from_dict(d):
   lc = caller_locals()
-  for varname, val in d.iteritems():
+  for varname, val in d.items():
     lc[varname] = val
 
 def is_frame_toplevel(f):
@@ -1626,7 +1636,7 @@ def toplevel_vars(var_dict):
     else:
       return
   if f is None:
-    print >>sys.stderr, 'Could not find toplevel'
+    print('Could not find toplevel', file=sys.stderr)
     return
   f.f_locals.update(var_dict)
 
@@ -1739,8 +1749,8 @@ def sub_img_with_pad(A, rect):
 #   i1, j1 = y1, x1
 #   i2, j2 = y2, x2
 #   B = np.zeros((i2 - i1 + 1, j2 - j1 + 1) + tuple(A.shape[2:]))
-#   for i in xrange(i1, 1 + i2):
-#     for j in xrange(j1, 1 + j2):
+#   for i in range(i1, 1 + i2):
+#     for j in range(j1, 1 + j2):
 #       ii = min(max(i, 0), A.shape[0]-1)
 #       jj = min(max(j, 0), A.shape[1]-1)
 #       B[i - i1, j - j1] = A[ii, jj]
@@ -1751,7 +1761,7 @@ def test_sub_img_with_pad():
   A[:, 0] = 0
   A[0, :] = 0
   B = sub_img_with_pad(A, -2, -2, 2, 2)
-  print B
+  print(B)
   assert np.all(B[:, :2] == 0)
   assert np.all(B[:2, :] == 0)
   assert np.all(B[3:, 3:] == 1)
@@ -1792,7 +1802,7 @@ def invert_perm(inds):
 
 def assert_eq(a, b):
   if a != b:
-    print >>sys.stderr, 'assert_eq failed:', a, '!=', b
+    print('assert_eq failed:', a, '!=', b, file=sys.stderr)
   assert a == b
 
 def quote(x): return '"%s"' % x
@@ -1814,7 +1824,7 @@ class ColorChooser:
     # nearby_colors = np.array(nearby_colors)
     # dist_best = -1
     # color_best = None
-    # for i in xrange(self.attempts):
+    # for i in range(self.attempts):
     #   new_color = rand_color()
     #   dist_sum = 0 if len(nearby_colors) == 0 else np.min(np.sqrt(np.sum((nearby_colors - np.array(new_color))**2, axis = 1)))
     #   if dist_sum > dist_best:
@@ -1837,12 +1847,12 @@ class ColorChooser:
 
 # def distinct_colors(n):
 #   cc = ColorChooser(attempts = 10)
-#   return do_with_seed(lambda : [cc.choose((0,0)) for x in xrange(n)])
+#   return do_with_seed(lambda : [cc.choose((0,0)) for x in range(n)])
 
 def distinct_colors(n):
   #cc = ColorChooser(attempts = 10, init_colors = [red, green, blue, yellow, purple, cyan], init_pts = [(0, 0)]*6)
   cc = ColorChooser(attempts = 100, init_colors = [red, green, blue, yellow, purple, cyan], init_pts = [(0, 0)]*6)
-  do_with_seed(lambda : [cc.choose((0,0)) for x in xrange(n)])
+  do_with_seed(lambda : [cc.choose((0,0)) for x in range(n)])
   return cc.colors[:n]
 
 def notnan(x):
@@ -1877,7 +1887,7 @@ def sample_replace(xs, n):
   if len(xs) == 0 and n > 0:
     fail("Can't sample from empty collection")
   ys = []
-  for i in xrange(n):
+  for i in range(n):
     ys.append(xs[random.randint(0, len(xs)-1)])
   return ys
 
@@ -1905,7 +1915,7 @@ def check_print(b, msg = None):
   """ Prints the assert message to stderr if it failed """
   if not b:
     if msg is not None:
-      print >>sys.stderr, msg
+      print(msg, file=sys.stderr)
     fail('Check failed %s' % ('' if msg is None else msg))
 
 def lazy_get(dict, k, f):
@@ -1914,16 +1924,16 @@ def lazy_get(dict, k, f):
   return dict[k]
 
 def list2d(n, m, v = None):
-  return [[None] * m for x in xrange(n)]
+  return [[None] * m for x in range(n)]
 
 def list3d(n, m, d, v = None):
-  return [list2d(m, d) for x in xrange(n)]
+  return [list2d(m, d) for x in range(n)]
 
 def transpose_list2d(lsts):
   return map(list, zip(*lsts))
 
 def dup(n, x):
-  return [copy.deepcopy(x) for i in xrange(n)]
+  return [copy.deepcopy(x) for i in range(n)]
 
 # def guess_bytes(x):
 #   return len(pickle.dumps(x))
@@ -1955,7 +1965,7 @@ class MapAttr:
     self.xs = xs
 
   def __getattr__(self, k):
-    print 'k=',k
+    print('k=',k)
     return [getattr(x, k) for x in self.xs]
 
 class MapAttr:
@@ -2119,7 +2129,7 @@ def prob_rows(A):
 
 def prn_lines(lines):
   for x in lines:
-    print x
+    print(x)
 
 def rect_shape(r):
   return (int(r[3]), int(r[2]))
@@ -2143,7 +2153,7 @@ def host_file(src_fname, dst_fname = None, server_dir = '/csail/vision-billf5/ah
   os.system('cp %s %s' % (src_fname, dst_server))
   os.system('chmod a+rwx %s' % dst_server)
   url = os.path.join(public_url, subdir, dst_fname)
-  print url
+  print(url)
   return dst_server, url
 
 def concat_files(fnames):
@@ -2196,16 +2206,16 @@ def asample_most(a, n):
     return a[inds]
 
 def choose2(xs):
-  for i in xrange(len(xs)):
-    for j in xrange(1+i, len(xs)):
+  for i in range(len(xs)):
+    for j in range(1+i, len(xs)):
       yield xs[i], xs[j]
 
 def preval(code):
-  print code, '=', eval(code, caller_globals(), caller_locals())
+  print(code, '=', eval(code, caller_globals(), caller_locals()))
 
 def bitstrings(n):
   bs = [[]]
-  for k in xrange(n):
+  for k in range(n):
     bs = [b+[0] for b in bs] + [b+[1] for b in bs]
   return np.array(bs)
 
@@ -2243,13 +2253,13 @@ def structargs(names):
     d = {}
     if len(tup) != len(names):
       raise RuntimeError('Input tuple should have size %d; got one with size %d' % (len(names), len(tup)))
-    for i in xrange(len(tup)):
+    for i in range(len(tup)):
       if type(names[i]) == type(''):
         d[names[i]] = tup[i]
       elif type(names[i]) == type((1,)):
         if len(names[i]) != len(tup[i]):
           raise RuntimeError('Tuple %d should have size %d; got one with size %d' % (i, len(names[i]), len(tup[i])))
-        for j in xrange(len(names[i])):
+        for j in range(len(names[i])):
           if type(names[i][j]) != type(''):
             raise RuntimeError('Field name tuple %d should only contain strings' % i)
           d[names[i][j]] = tup[i][j]
@@ -2267,7 +2277,7 @@ def structprod(*name_val_pairs, **kwargs):
   names = list(name_val_pairs[::2])
   vals = list(name_val_pairs[1::2])
 
-  for k, v in kwargs.iteritems():
+  for k, v in kwargs.items():
     names.append(k)
     vals.append(v)
 
@@ -2549,11 +2559,11 @@ def ignore_exc(f, show = True):
     f()
   except Exception as e:
     if show:
-      print sys.exc_info()[0]
+      print(sys.exc_info()[0])
     return e
   except:
     if show:
-      print sys.exc_info()[0]
+      print(sys.exc_info()[0])
 
 def update_local_classes():
   for o in gc.get_objects():
@@ -2630,11 +2640,11 @@ def mult_im(A, im):
 def wait_for_nfs(max_wait = 60*30, test_file = '/data/vision/billf/aho-stuff/vis/data/flickr2/v4-dset/3906219160/feat/0010_sf_tex.pk'):
   # todo: pick a more general file
   if not os.path.exists(test_file):
-    print 'NFS down!'
+    print('NFS down!')
     start = time.time()
     while (not os.path.exists(test_file)) and (time.time() < start + max_wait):
       time.sleep(1)
-    print 'Waited for', time.time() - start, 'seconds'
+    print('Waited for', time.time() - start, 'seconds')
 
   return os.path.exists(test_file)
 
@@ -2762,7 +2772,7 @@ def norms(xs):
 def interpolate_line(pts, n = 500):
   pts = np.asarray(pts)
   interp = []
-  for i in xrange(len(pts)-1):
+  for i in range(len(pts)-1):
     p = np.linspace(0, 1., n)[:, np.newaxis]
     interp += list(p*pts[i][np.newaxis, :] + (1-p)*pts[i+1][np.newaxis, :])
   return ensure_col(interp, pts.shape[1])
@@ -2805,7 +2815,7 @@ class temp_file:
 
 class temp_files:
   def __init__(self, ext, count, path = None, fname_only = False, delete_on_exit = True):
-    self.fnames = [make_temp(ext, dir = path) for i in xrange(count)]
+    self.fnames = [make_temp(ext, dir = path) for i in range(count)]
     self.delete_on_exit = delete_on_exit
     if fname_only:
       for fname in self.fnames:
@@ -2851,7 +2861,7 @@ def bool_from_inds(n, inds):
 def merge_maps(maps):
   res = {}
   for x in maps:
-    for k, v in x.iteritems():
+    for k, v in x.items():
       add_dict_list(res, k, v)
   return res
 
@@ -2860,7 +2870,7 @@ class LazyFS:
   def __init__(self, v):
     self.fname = make_temp_nfs('.pk')
     self.loaded = False
-    print self.fname
+    print(self.fname)
     save(self.fname, v)
     
   def get(self):
@@ -2873,7 +2883,7 @@ class LazyFS:
   def clear(self):
     self.loaded = self.cache = None
     if os.path.exists(self.fname):
-      print 'Removing', self.fname
+      print('Removing', self.fname)
       os.remove(self.fname)
 
   def __enter__(self):
@@ -2932,7 +2942,7 @@ def cast_types(xs, types):
   return tuple([np.array([x], t)[0] for x, t in zip(xs, types)])
 
 def path_subdir(path, n = 1):
-  for i in xrange(n):
+  for i in range(n):
     path = os.path.split(path)[0]
   return path
 
@@ -2968,7 +2978,7 @@ def printoptions(*args, **kwargs):
 
 def print_prec(x, prec):
   with printoptions(precision=prec, suppress=True):
-    print x
+    print(x)
 
 def print1f(x): print_prec(x, 1)
 def print2f(x): print_prec(x, 2)
@@ -3119,7 +3129,9 @@ def plot_im(*args, **kwargs):
     pylab.ylim(kwargs['ylim'])
   return ig.from_fig()
 
-def swaptup((x,y)): return (y,x)
+def swaptup(bbox): 
+  x,y = bbox
+  return (y,x)
 
 def append_to_each(xs, y):
   return [(x, y) for x in xs]
@@ -3186,7 +3198,7 @@ def argsort_confint(pos_totals):
     assert pos <= total
     l, u = proportion_confint(count = pos, nobs = total)
     vals.append(l)
-    print pos, total, l, u, (u-l)/2.
+    print(pos, total, l, u, (u-l)/2.)
   return np.argsort(np.array(vals))[::-1]
 
 def afs_readable():
@@ -3218,7 +3230,7 @@ def normvec(x):
 def mean_pm(p, n):
   import scipy.stats
   if not (n*p > 5 and n*(1-p) > 5):
-    print 'Not enough samples for normal approximation (doing anyway)'
+    print('Not enough samples for normal approximation (doing anyway)')
   alpha = 0.05
   z = scipy.stats.norm.ppf(1-0.5*alpha)
   edge = z*np.sqrt(1./n*p*(1-p))
@@ -3322,9 +3334,9 @@ def dict_union(*ds):
 
 def printlns(xs, last_blank = False):
   for x in xs:
-    print x
+    print(x)
   if last_blank:
-    print
+    print()
 
 def read_lines_split(fname):
   return [x.split() for x in read_lines(fname)]

@@ -78,7 +78,7 @@ def draw_rects(im, rects, outlines = None, fills = None, texts = None, text_colo
         # w += 2*lw
         # h += 2*lw
         # pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
-        # for i in xrange(len(pts)):
+        # for i in range(len(pts)):
         #   #draw.line(pts[i] + pts[(i+1)%4], fill = outline, width = lw)
         #   draw.rectangle(pts[i] + pts[(i+1)%4], fill = outline, width = lw)
         d = int(np.ceil(lw/2))
@@ -256,7 +256,7 @@ def rgb_from_gray(img, copy = True, remove_alpha = True):
 
 def load(im_fname, gray = False):
   if im_fname.endswith('.gif'):
-    print "GIFs don't load correctly for some reason"
+    print("GIFs don't load correctly for some reason")
     ut.fail('fail')
   im = from_pil(Image.open(im_fname))
   # use imread, then flip upside down
@@ -295,7 +295,7 @@ def save(img_fname, a):
 def show_html(html):
   page = ut.make_temp('.html')
   ut.make_file(page, html)
-  print 'opening', page
+  print('opening', page)
   webbrowser.open(page)
 
 # # http://opencv.willowgarage.com/wiki/PythonInterface
@@ -443,7 +443,7 @@ def blur(im, sigma):
   if np.ndim(im) == 2:
     return scipy.ndimage.filters.gaussian_filter(im, sigma)
   else:
-    return np.concatenate([scipy.ndimage.filters.gaussian_filter(im[:, :, i], sigma)[:, :, np.newaxis] for i in xrange(im.shape[2])], axis = 2)
+    return np.concatenate([scipy.ndimage.filters.gaussian_filter(im[:, :, i], sigma)[:, :, np.newaxis] for i in range(im.shape[2])], axis = 2)
 
 def blit(src, dst, x, y, opt = None):
   if opt == 'center':
@@ -496,8 +496,8 @@ def rotate(img, angle, fill = 0):
 def map_img(f, im, dtype = None, components = None):
   new_im = np.zeros(im.shape if components is None else im.shape + (components,), \
                     dtype = im.dtype if dtype is None else dtype)
-  for y in xrange(im.shape[0]):
-    for x in xrange(im.shape[1]):
+  for y in range(im.shape[0]):
+    for x in range(im.shape[1]):
       new_im[y,x] = f(im[y,x])
   return new_im
 
@@ -551,11 +551,11 @@ def compute_pyramid(ptm, interval, min_size):
   scale = [None]*len(ims)
 
   # skipping 2x scale
-  for i in xrange(1, interval+1):
+  for i in range(1, interval+1):
     im_scaled = resize(ptm, 1/sc**(i-1))
     ims[-1 + i] = im_scaled
     scale[-1 + i] = 1/sc**(i-1)
-    for j in xrange(i+interval, max_scale+1, interval):
+    for j in range(i+interval, max_scale+1, interval):
       im_scaled = resize(im_scaled, 0.5)
       ims[-1 + j] = im_scaled
       scale[-1 + j] = 0.5*scale[-1 + j - interval]
@@ -716,7 +716,7 @@ def remap_color(im, xy):
   assert im.shape[:2] == xy.shape[:2]
   assert xy.shape[2] == 2
   vals = []
-  for i in xrange(im.shape[2]):
+  for i in range(im.shape[2]):
     dx = xy[..., 0].flatten()[np.newaxis, :]
     dy = xy[..., 1].flatten()[np.newaxis, :]
     v = scipy.ndimage.map_coordinates(im[..., i], np.concatenate([dy, dx]))
@@ -728,7 +728,8 @@ def stack_meshgrid(xs, ys, dtype = 'l'):
   x, y = np.meshgrid(xs, ys)
   return np.array(np.concatenate([x[..., np.newaxis], y[..., np.newaxis]], axis = 2), dtype = dtype)
 
-def sub_img_pad(im, (x, y, w, h), oob = 0):
+def sub_img_pad(im, bbox, oob = 0):
+  x, y, w, h = bbox
   if len(im.shape) == 2:
     dst = np.zeros((h, w))
   else:
@@ -740,7 +741,8 @@ def sub_img_pad(im, (x, y, w, h), oob = 0):
       (sx - x) : (sx - x) + sw] = im[sy : sy + sh, sx : sx + sw]
   return dst
 
-def sub_img_reflect(im, (x, y, w, h)):
+def sub_img_reflect(im, bbox):
+  x, y, w, h = bbox
   x, y, w, h = map(ut.iround, [x, y, w, h])
   yy, xx = np.mgrid[y : y + h, x : x + w]
   vals = np.uint8(lookup_bilinear(im, xx.flatten(), yy.flatten(), order = 0, mode = 'reflect'))
@@ -773,9 +775,9 @@ def uncompress(s):
 
 def test_compress():
   im = load('/afs/csail.mit.edu/u/a/aho/bear.jpg')
-  print 'orig', ut.guess_bytes(im)
+  print('orig', ut.guess_bytes(im))
   s = compress(im)
-  print 'comp', ut.guess_bytes(s)
+  print('comp', ut.guess_bytes(s))
   assert(np.all(im == uncompress(s)))
   
 def mix_ims(im1, im2, mask, alpha = 0.5):
@@ -795,9 +797,10 @@ def lookup_bilinear(im, x, y, order = 1, mode = 'constant', cval = 0.0):
     return scipy.ndimage.map_coordinates(im, yx, order = order, mode = mode, cval = cval)
   else:
     return np.concatenate([scipy.ndimage.map_coordinates(im[:, :, i], yx, order = order, mode = mode)[:, np.newaxis] \
-                           for i in xrange(im.shape[2])], axis = 1)
+                           for i in range(im.shape[2])], axis = 1)
 
-def map_helper((xs, i, order, mode)):
+def map_helper(args):
+  xs, i, order, mode = args
   return scipy.ndimage.map_coordinates(xs, np.array([i]), order = order, mode = mode)[:, np.newaxis]
 
 def lookup_bilinear1d(xs, i, order = 4, mode = 'constant', cval = 0.0, par = 0):
@@ -805,11 +808,11 @@ def lookup_bilinear1d(xs, i, order = 4, mode = 'constant', cval = 0.0, par = 0):
     return scipy.ndimage.map_coordinates(xs, i, order = order, mode = mode, cval = cval)
   else:
     if par:
-      vals = [(xs[:, j], i, order, mode) for j in xrange(xs.shape[1])]
+      vals = [(xs[:, j], i, order, mode) for j in range(xs.shape[1])]
       return np.concatenate(ut.parmap(map_helper, vals), axis = 1)
     else:
       return np.concatenate([scipy.ndimage.map_coordinates(xs[:, j], np.array([i]), order = order, mode = mode)[:, np.newaxis] \
-                             for j in xrange(xs.shape[1])], axis = 1)
+                             for j in range(xs.shape[1])], axis = 1)
       
   
 #def pixels_in_bounds(im, xs, ys):
@@ -826,7 +829,7 @@ def try_load_img(fname, default_size = (256, 256)):
   try:
     return load(fname)
   except IOError:
-    print 'Failed to load:', fname
+    print('Failed to load:', fname)
     return make(default_size[0], default_size[1])
   
 

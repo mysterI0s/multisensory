@@ -1,4 +1,5 @@
-import numpy as np, tfutil as mu, aolib.util as ut, tensorflow as tf
+import numpy as np, tfutil as mu, aolib.util as ut, tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 ed = tf.expand_dims
 shape = mu.shape
@@ -84,7 +85,7 @@ def stft_num_fft(pr): return int(2**np.ceil(np.log2(stft_frame_length(pr))))
 
 def stft(samples, pr):
   tracks = []
-  for i in xrange(shape(samples, -1)):
+  for i in range(shape(samples, -1)):
     spec = tf.contrib.signal.stft(samples[..., i], 
                                  frame_length = stft_frame_length(pr),
                                  frame_step = stft_frame_step(pr))

@@ -1,6 +1,7 @@
-import numpy as np, tfutil as mu, aolib.util as ut, aolib.sound as sound, aolib.img as ig, sep_dset, tensorflow as tf, aolib.imtable as imtable, shift_net, gc, soundrep
+import numpy as np, tfutil as mu, aolib.util as ut, aolib.sound as sound, aolib.img as ig, sep_dset, tensorflow.compat.v1 as tf, aolib.imtable as imtable, shift_net, gc, soundrep
+tf.disable_v2_behavior()
 
-import tensorflow.contrib.slim as slim
+import tf_slim as slim
 
 ed = tf.expand_dims
 shape = mu.shape
@@ -28,7 +29,7 @@ class NetClf:
 
   def init(self, reset = True):
     if self.sess is None:
-      print 'Running on:', self.gpu
+      print('Running on:', self.gpu)
       with tf.device(self.gpu):
         if reset:
           tf.reset_default_graph()
@@ -57,10 +58,10 @@ class NetClf:
         self.samples_pred_fg = self.net.pred_wav_fg
         self.samples_pred_bg = self.net.pred_wav_bg
 
-        print 'Restoring from:', self.model_path
+        print('Restoring from:', self.model_path)
         if self.restore_only_shift:
-          print 'restoring only shift'
-          import tensorflow.contrib.slim as slim
+          print('restoring only shift')
+          import tf_slim as slim
           var_list = slim.get_variables_to_restore()
           var_list = [x for x in var_list if x.name.startswith('im/') or x.name.startswith('sf/') or x.name.startswith('joint/')]
           self.sess.run(tf.global_variables_initializer())
@@ -70,13 +71,13 @@ class NetClf:
         tf.get_default_graph().finalize()
 
   def predict(self, ims, samples):
-    print 'predict'
-    print 'samples shape:', samples.shape
+    print('predict')
+    print('samples shape:', samples.shape)
     spec_mix = self.sess.run(self.specgram_op, {self.samples_ph : samples})
     spec_pred, spec_pred_bg, samples_pred_fg, samples_pred_bg = self.sess.run(
       [self.spec_pred, self.spec_pred_bg, self.samples_pred_fg, self.samples_pred_bg], 
       {self.ims_ph : ims, self.samples_ph : samples})
-    print 'samples pred shape:', samples.shape
+    print('samples pred shape:', samples.shape)
     return dict(samples_pred_fg = samples_pred_fg, 
                 samples_pred_bg = samples_pred_bg, 
                 samples_mix = samples,
@@ -120,14 +121,14 @@ def read_data(pr, gpus):
       num_db_files = pr.num_dbs))
   
   inputs = {'ims' : ims, 'samples' : samples, 'ytids' : ytids}
-  splits = [{} for x in xrange(len(gpus))]   
+  splits = [{} for x in range(len(gpus))]   
   for k, v in inputs.items():
     if v is None:
-      for i in xrange(len(gpus)):
+      for i in range(len(gpus)):
         splits[i][k] = None
     else:
       s = tf.split(v, len(gpus))
-      for i in xrange(len(gpus)):
+      for i in range(len(gpus)):
         splits[i][k] = s[i]
   return splits
  
@@ -155,7 +156,7 @@ def pool3d(x, dim, stride, padding = 'SAME'):
     x, ksize = [1] + list(dim) + [1],
     strides = [1] + list(stride) + [1], 
     padding = padding)
-  print 'pool ->', shape(x)
+  print('pool ->', shape(x))
   return x
 
 def has_prefix(x, prefix):
@@ -167,25 +168,25 @@ def slim_losses_with_prefix(prefix, show = True):
   losses = tf.losses.get_regularization_losses()
   losses = [x for x in losses if prefix is None or x.name.startswith(prefix)]
   if show:
-    print 'Collecting losses for prefix %s:' % prefix
+    print('Collecting losses for prefix %s:' % prefix)
     for x in losses:
-      print x.name
-    print
+      print(x.name)
+    print()
   return mu.maybe_add_n(losses)
 
 def vars_with_prefix(prefix):
   vs = [x for x in tf.trainable_variables() if has_prefix(x.name, prefix)]
   missing_vs = [x for x in tf.trainable_variables() if not has_prefix(x.name, prefix)]
-  print
-  print 'Variables included (prefix = "%s"):' % prefix
+  print()
+  print('Variables included (prefix = "%s"):' % prefix)
   for x in vs:
-    print x.name
-  print
+    print(x.name)
+  print()
 
-  print 'Variables NOT included (prefix = "%s"):' % prefix
+  print('Variables NOT included (prefix = "%s"):' % prefix)
   for x in missing_vs:
-    print x.name
-  print
+    print(x.name)
+  print()
 
   return vs
 
@@ -193,10 +194,10 @@ def slim_ups_with_prefix(prefix, show = True):
   ups = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
   ups = [x for x in ups if prefix is None or x.name.startswith(prefix)]
   if show:
-    print 'Collecting batch norm updates for prefix %s:' % prefix
+    print('Collecting batch norm updates for prefix %s:' % prefix)
     for x in ups:
-      print x.name
-    print
+      print(x.name)
+    print()
   return ups
 
 def show_results(ims, samples_mix, samples_gt, spec_mix, spec_gt, spec_pred_fg, spec_pred0, 
@@ -296,12 +297,12 @@ def mix_sounds(samples0, pr, quiet_thresh_db = 40., samples1 = None):
     n = shape(samples0, 0)/2
     samples0 = samples0[:, :pr.sample_len]
     if pr.both_videos_in_batch:
-      print 'Using both videos'
+      print('Using both videos')
       samples1 = tf.concat(
         [samples0[n:, :pr.sample_len],
          samples0[:n, :pr.sample_len]], axis = 0)
     else:
-      print 'Only using first videos'
+      print('Only using first videos')
       samples1 = samples0[n:]
       samples0 = samples0[:n]
   else:
@@ -309,7 +310,7 @@ def mix_sounds(samples0, pr, quiet_thresh_db = 40., samples1 = None):
     samples1 = samples1[:, :pr.sample_len]
 
   if pr.augment_rms:
-    print 'Augmenting rms'
+    print('Augmenting rms')
     # scale0 = tf.random_uniform((shape(samples0, 0), 1, 1), 0.9, 1.1)
     # scale1 = tf.random_uniform((shape(samples1, 0), 1, 1), 0.9, 1.1)
     db = 0.25
@@ -323,9 +324,9 @@ def mix_sounds(samples0, pr, quiet_thresh_db = 40., samples1 = None):
   spec0, phase0 = stft(make_mono(samples0), pr)
   spec1, phase1 = stft(make_mono(samples1), pr)
 
-  print 'Before truncating specgram:', shape(spec_mix)
+  print('Before truncating specgram:', shape(spec_mix))
   spec_mix = spec_mix[:, :pr.spec_len]
-  print 'After truncating specgram:', shape(spec_mix)
+  print('After truncating specgram:', shape(spec_mix))
   phase_mix = phase_mix[:, :pr.spec_len]
   spec0 = spec0[:, :pr.spec_len]
   spec1 = spec1[:, :pr.spec_len]
@@ -410,7 +411,7 @@ def add_pred_losses(gen_loss, net, snd, pr):
       gen_loss.add_loss(loss, 'phase-bg')
 
   if 'pit' in pr.loss_types:
-    print 'Using permutation loss'
+    print('Using permutation loss')
     ns = lambda x : normalize_spec(x, pr)
     np = lambda x : normalize_phase(x, pr)
     gts_ = [[ns(snd.spec_parts[0]), np(snd.phase_parts[0])],
@@ -419,9 +420,9 @@ def add_pred_losses(gen_loss, net, snd, pr):
              [ns(net.pred_spec_bg), np(net.pred_phase_bg)]]
     l1 = lambda x, y : tf.reduce_mean(tf.abs(x - y), [1, 2])
     losses = []
-    for i in xrange(2):
+    for i in range(2):
       gt = [gts_[i%2], gts_[(i+1)%2]]
-      print 'preds[0][0] shape =', shape(preds[0][0])
+      print('preds[0][0] shape =', shape(preds[0][0]))
       fg_spec = pr.l1_weight * l1(preds[0][0], gt[0][0])
       fg_phase = pr.phase_weight * l1(preds[0][1], gt[0][1])
       
@@ -430,9 +431,9 @@ def add_pred_losses(gen_loss, net, snd, pr):
 
       losses.append(fg_spec + fg_phase + bg_spec + bg_phase)
     losses = tf.concat([ed(x, 0) for x in losses], 0)
-    print 'losses shape =', shape(losses)
+    print('losses shape =', shape(losses))
     loss_val = tf.reduce_min(losses, 0)
-    print 'losses shape after min =', shape(losses)
+    print('losses shape after min =', shape(losses))
     loss_val = pr.pit_weight * tf.reduce_mean(loss_val)
     #loss_val = tf.Print(loss_val, [losses])
 
@@ -497,12 +498,12 @@ class Model:
       self.init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
       self.sess.run(self.init_op)
       tf.train.start_queue_runners(sess = self.sess, coord = self.coord)
-      print 'Initializing'
+      print('Initializing')
 
       self.merged_summary = tf.summary.merge_all()
-      print 'Tensorboard command:'
+      print('Tensorboard command:')
       summary_dir = ut.mkdir(pj(pr.summary_dir, ut.simple_timestamp()))
-      print 'tensorboard --logdir=%s' % summary_dir
+      print('tensorboard --logdir=%s' % summary_dir)
       self.sum_writer = tf.summary.FileWriter(summary_dir, self.sess.graph)
 
       if self.profile:
@@ -541,7 +542,7 @@ class Model:
         else:
           # doesn't work with baselines, such as I3D
           #raise RuntimeError()
-          print 'WARNING: DO NOT USE GAN WITH I3D'
+          print('WARNING: DO NOT USE GAN WITH I3D')
           var_list = vars_with_prefix('gen') + vars_with_prefix('im') + vars_with_prefix('sf')
           grads = opt.compute_gradients(gen_loss.total_loss(), var_list = var_list)
         ut.add_dict_list(gpu_grads, 'gen', grads)
@@ -582,7 +583,7 @@ class Model:
         else:
           bn_ups = slim_ups_with_prefix('discrim')
 
-        print 'Number of batch norm ups for', name, len(bn_ups)
+        print('Number of batch norm ups for', name, len(bn_ups))
         with tf.control_dependencies(bn_ups):
           op = opt.apply_gradients(gvs)
         #op = tf.group(opt.apply_gradients(gvs, global_step = (self.step if name == 'discrim' else None)), *bn_ups)
@@ -597,7 +598,7 @@ class Model:
     if pr.gan_weight > 0:
       self.train_op = tf.group(*(ops + [self.update_step]))
     else:
-      print 'Only using generator, because gan_weight = %.2f' % pr.gan_weight
+      print('Only using generator, because gan_weight = %.2f' % pr.gan_weight)
       self.train_op = tf.group(ops[0], self.update_step)
 
   def make_show_op(self, net, ims, snd, ytids):
@@ -615,17 +616,17 @@ class Model:
   def checkpoint_fast(self):
     check_path = pj(ut.mkdir(self.pr.train_dir), 'net.tf')
     out = self.saver_fast.save(self.sess, check_path, global_step = self.step)
-    print 'Checkpoint:', out
+    print('Checkpoint:', out)
 
   def checkpoint_slow(self):
     check_path = pj(ut.mkdir(pj(self.pr.train_dir, 'slow')), 'net.tf')
     out = self.saver_slow.save(self.sess, check_path, global_step = self.step)
-    print 'Checkpoint:', out
+    print('Checkpoint:', out)
 
   def restore(self, path = None, restore_opt = True, init_type = None):
     if path is None:
       path = tf.train.latest_checkpoint(self.pr.train_dir)      
-    print 'Restoring from:', path
+    print('Restoring from:', path)
     var_list = slim.get_variables_to_restore()
     opt_names = ['Adam', 'beta1_power', 'beta2_power', 'Momentum', 'cache']
 
@@ -643,10 +644,10 @@ class Model:
     if not restore_opt or init_type is not None:
       var_list = [x for x in var_list if not any(name in x.name for name in opt_names)]
 
-    print 'Restoring:'
+    print('Restoring:')
     for x in var_list:
-      print x.name
-    print
+      print(x.name)
+    print()
     
     tf.train.Saver(var_list).restore(self.sess, path)
 
@@ -702,7 +703,7 @@ class Model:
       out = ' '.join(out)
 
       if step < 10 or step % pr.print_iters == 0:
-        print 'Iteration %d, lr = %.0e, %s, time: %.3f' % (step, lr, out, ts)
+        print('Iteration %d, lr = %.0e, %s, time: %.3f' % (step, lr, out, ts))
 
       num_steps += 1
 
@@ -716,11 +717,11 @@ def find_best_iter(pr, gpu, num_iters = 10, sample_rate = 10, dset_name = 'val')
   assert len(model_paths), 'no model paths at %s' % pj(pr.train_dir, 'slow', 'net*.index')
   for model_path in model_paths:
     model_path = model_path.split('.index')[0]
-    print model_path
+    print(model_path)
     clf = NetClf(pr, model_path, gpu = gpu)
     clf.init()
     if dset_name == 'train':
-      print 'train'
+      print('train')
       tf_files = sorted(ut.glob(pj(pr.train_list, '*.tf')))
     elif dset_name == 'val':
       tf_files = sorted(ut.glob(pj(pr.val_list, '*.tf')))
@@ -743,25 +744,25 @@ def find_best_iter(pr, gpu, num_iters = 10, sample_rate = 10, dset_name = 'val')
           loss += np.mean(np.abs(res['spec_pred_fg'] - res['spec0']))
           loss += np.mean(np.abs(res['spec_pred_bg'] - res['spec1']))
         losses.append(loss)
-        print 'running:', np.mean(losses)
+        print('running:', np.mean(losses))
         loss = np.mean(losses)
-    print model_path, 'Loss:', loss
+    print(model_path, 'Loss:', loss)
     best_iter = min(best_iter, (loss, model_path))
   ut.write_lines(pj(pr.resdir, 'model_path.txt'), [best_iter[1]])
 
 def pit_loss(gt0, gt1, pred0, pred1, pr):
   losses = []
   weights = np.array([pr.l1_weight, pr.phase_weight])
-  for i in xrange(2):
+  for i in range(2):
     gt = [gt0, gt1] if i == 0 else [gt1, gt0]
     loss = 0.
-    for j in xrange(1):
+    for j in range(1):
       p = np.array([pred0[j], pred1[j]])
       g = np.array([gt[0][j], gt[1][j]])
       w = weights[j]
       loss += w * np.mean(np.abs(p - g))
     losses.append(loss)
-  print 'losses =', losses
+  print('losses =', losses)
   return np.min(losses)
 
 # def find_best_iter(pr, gpu, num_iters = 10, sample_rate = 10, dset_name = 'val'):
@@ -830,17 +831,17 @@ def moving_avg(name, x, vals, avg_win_size = 100, p = 0.99):
 
 def conv2d(*args, **kwargs):
   out = slim.conv2d(*args, **kwargs)
-  print kwargs['scope'], shape(args[0]), '->', shape(out)
+  print(kwargs['scope'], shape(args[0]), '->', shape(out))
   return out
 
 def conv2d_same(*args, **kwargs):
   out = mu.conv2d_same(*args, **kwargs)
-  print kwargs['scope'], '->', shape(out)
+  print(kwargs['scope'], '->', shape(out))
   return out
 
 def deconv2d(*args, **kwargs):
   out = slim.conv2d_transpose(*args, **kwargs)
-  print kwargs['scope'], shape(args[0]), '->', shape(out)
+  print(kwargs['scope'], shape(args[0]), '->', shape(out))
   return out
 
 def unet_arg_scope(pr, 
@@ -929,7 +930,7 @@ def make_net(ims, sfs, spec, phase, pr,
              reuse = True, train = True, 
              vid_net_full = None):
   if pr.mono:
-    print 'Using mono!'
+    print('Using mono!')
     sfs = make_mono(sfs, tile = True)
 
   if vid_net_full is None:
@@ -983,9 +984,9 @@ def make_net(ims, sfs, spec, phase, pr,
       s = shape(vid_net)
       if shape(net, 1) != s[1]:
         vid_net = tf.image.resize_images(vid_net, [shape(net, 1), 1])
-        print 'Video net before merge:', s, 'After:', shape(vid_net)
+        print('Video net before merge:', s, 'After:', shape(vid_net))
       else:
-        print 'No need to resize:', s, shape(net)
+        print('No need to resize:', s, shape(net))
       vid_net = tf.tile(vid_net, (1, 1, shape(net, 2), 1))
       net = tf.concat([net, vid_net], 3)
       acts[-1] = net
@@ -1071,7 +1072,7 @@ def truncate_min(x, y):
   return x, y
 
 def train(pr, gpus, restore = False, restore_opt = True, profile = False):
-  print pr
+  print(pr)
   gpus = mu.set_gpus(gpus)
   with tf.Graph().as_default():
     config = tf.ConfigProto(allow_soft_placement = True)
@@ -1088,11 +1089,11 @@ def train(pr, gpus, restore = False, restore_opt = True, profile = False):
         rgb_variable_map = {}
         for variable in tf.global_variables():
           if any(x in variable.name for x in opt_names):
-            print 'Skipping:', variable.name
+            print('Skipping:', variable.name)
             continue
           if variable.name.split('/')[0] == 'RGB':
             rgb_variable_map[variable.name.replace(':0', '')] = variable
-            print 'Restoring:', variable.name
+            print('Restoring:', variable.name)
         rgb_saver = tf.train.Saver(var_list = rgb_variable_map, reshape=True)
         rgb_saver.restore(sess, pr.init_path)
       elif pr.init_type == 'scratch':

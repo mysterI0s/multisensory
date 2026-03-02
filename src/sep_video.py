@@ -1,5 +1,6 @@
 # Separate on- and off-screen sound from video file. See README for usage examples.
-import aolib.util as ut, aolib.img as ig, os, numpy as np, tensorflow as tf, tfutil as mu, scipy.io, sys, aolib.imtable as imtable, pylab, argparse, shift_params, shift_net
+import aolib.util as ut, aolib.img as ig, os, numpy as np, tensorflow.compat.v1 as tf, tfutil as mu, scipy.io, sys, aolib.imtable as imtable, pylab, argparse, shift_params, shift_net
+tf.disable_v2_behavior()
 import sourcesep, sep_params
 import aolib.sound as sound
 from aolib.sound import Sound
@@ -14,7 +15,7 @@ class NetClf:
 
   def init(self, reset = True):
     if self.sess is None:
-      print 'Running on:', self.gpu
+      print('Running on:', self.gpu)
       with tf.device(self.gpu):
         if reset:
           tf.reset_default_graph()
@@ -29,10 +30,10 @@ class NetClf:
         samples_trunc = self.samples_ph[:, :pr.sample_len]
 
         spec_mix, phase_mix = sourcesep.stft(samples_trunc[:, :, 0], pr)
-        print 'Raw spec length:', mu.shape(spec_mix)
+        print('Raw spec length:', mu.shape(spec_mix))
         spec_mix = crop_spec(spec_mix)
         phase_mix = crop_spec(phase_mix)
-        print 'Truncated spec length:', mu.shape(spec_mix)
+        print('Truncated spec length:', mu.shape(spec_mix))
 
         self.specgram_op, phase = map(crop_spec, sourcesep.stft(samples_trunc[:, :, 0], pr))
         self.auto_op = sourcesep.istft(self.specgram_op, phase, pr)
@@ -45,10 +46,10 @@ class NetClf:
         self.samples_pred_fg = self.net.pred_wav_fg
         self.samples_pred_bg = self.net.pred_wav_bg
         
-        print 'Restoring from:', pr.model_path
+        print('Restoring from:', pr.model_path)
         if self.restore_only_shift:
-          print 'restoring only shift'
-          import tensorflow.contrib.slim as slim
+          print('restoring only shift')
+          import tf_slim as slim
           var_list = slim.get_variables_to_restore()
           var_list = [x for x in var_list if x.name.startswith('im/') or x.name.startswith('sf/') or x.name.startswith('joint/')]
           self.sess.run(tf.global_variables_initializer())
@@ -58,13 +59,13 @@ class NetClf:
         tf.get_default_graph().finalize()
 
   def predict(self, ims, samples):
-    print 'predict'
-    print 'samples shape:', samples.shape
+    print('predict')
+    print('samples shape:', samples.shape)
     spec_mix = self.sess.run(self.specgram_op, {self.samples_ph : samples})
     spec_pred_fg, spec_pred_bg, samples_pred_fg, samples_pred_bg = self.sess.run(
       [self.spec_pred_fg, self.spec_pred_bg, self.samples_pred_fg, self.samples_pred_bg], 
       {self.ims_ph : ims, self.samples_ph : samples})
-    print 'samples pred shape:', samples.shape
+    print('samples pred shape:', samples.shape)
     return dict(samples_pred_fg = samples_pred_fg, 
                 samples_pred_bg = samples_pred_bg, 
                 spec_pred_fg = spec_pred_fg, 
@@ -102,7 +103,7 @@ class NetClf:
       f = min(ims.shape[1:3])
       ims = np.array([ig.scale(im, (f, f)) for im in ims])
       d = int(224./256 * ims.shape[1])
-      print 'd =', d, ims.shape
+      print('d =', d, ims.shape)
       full = None
       count = None
       if n == 1:
@@ -113,7 +114,7 @@ class NetClf:
         xs = np.linspace(0, ims.shape[2] - d, n).astype('int64')
 
       if num_times == 1:
-        print 'Using one time'
+        print('Using one time')
         ts = [0.]
       else:
         ts = np.linspace(-2, 2., n)
@@ -123,7 +124,7 @@ class NetClf:
           crop = ims[:, y : y + d, x : x + d]
           crop = resize_nd(crop, (crop.shape[0], pr.crop_im_dim, pr.crop_im_dim, 3), order = 1)
           for shift in ts:
-            print x, y, t
+            print(x, y, t)
             snd = sound.Sound(samples, self.pr.samp_sr)
             s0 = int(shift * snd.rate)
             s1 = s0 + snd.samples.shape[0]
@@ -140,7 +141,7 @@ class NetClf:
             cam_resized = scipy.ndimage.zoom(
               cam, np.array((full.shape[0], d, d), 'float32') / np.array(cam.shape, 'float32'))
             if 1:
-              print 'abs'
+              print('abs')
               cam_resized = np.abs(cam_resized)
             # print np.abs(cam_resized).max()
 
@@ -192,7 +193,7 @@ def heatmap(frames, cam, lo_frac = 0.5, adapt = True, max_val = 35):
     return frames
 
   outs = []
-  for i in xrange(frames.shape[0]):
+  for i in range(frames.shape[0]):
     lo = lo_frac * max_val
     hi = max_val + 0.001
     im = frames[i]
@@ -246,7 +247,7 @@ def find_cam(ims, samples, arg):
   return cam, vis
 
 def run(vid_file, start_time, dur, pr, gpu, buf = 0.05, mask = None, arg = None, net = None):
-  print pr
+  print(pr)
   dur = dur + buf
   with ut.TmpDir() as vid_path:
     height_s = '-vf "scale=-2:\'min(%d,ih)\'"' % arg.max_full_height if arg.max_full_height > 0 else ''
@@ -297,7 +298,7 @@ def run(vid_file, start_time, dur, pr, gpu, buf = 0.05, mask = None, arg = None,
     samples_pred_bg = ret['samples_pred_bg'][0][:, None]
     spec_pred_fg = ret['spec_pred_fg'][0]
     spec_pred_bg = ret['spec_pred_bg'][0]
-    print spec_pred_bg.shape
+    print(spec_pred_bg.shape)
     spec_mix = ret['spec_mix'][0]
 
     if arg.cam:
@@ -348,8 +349,8 @@ if __name__ == '__main__':
   if arg.gpu < 0:
     arg.gpu = None
 
-  print 'Start time:', arg.start
-  print 'GPU =', arg.gpu
+  print('Start time:', arg.start)
+  print('GPU =', arg.gpu)
 
   gpus = [arg.gpu]
   gpus = mu.set_gpus(gpus)
@@ -366,17 +367,17 @@ if __name__ == '__main__':
   if arg.clip_dur is None:
     arg.clip_dur = pr.vid_dur
   pr.input_rms = np.sqrt(0.1**2 + 0.1**2)
-  print 'Spectrogram samples:', pr.spec_len
+  print('Spectrogram samples:', pr.spec_len)
   pr.model_path = '../results/nets/sep/%s/net.tf-%d' % (pr.name, pr.train_iters)
 
   if not os.path.exists(arg.vid_file):
-    print 'Does not exist:', arg.vid_file
+    print('Does not exist:', arg.vid_file)
     sys.exit(1)
 
   if arg.duration is None:
     arg.duration = arg.clip_dur + 0.01
 
-  print arg.duration, arg.clip_dur
+  print(arg.duration, arg.clip_dur)
   full_dur = arg.duration
   #full_dur = min(arg.duration, ut.video_length(arg.vid_file))
   #full_dur = arg.duration
@@ -399,7 +400,7 @@ if __name__ == '__main__':
     if ret is None:
       continue
     ims = ret['ims']
-    for frame, im in zip(xrange(frame_start, frame_start + len(ims)), ims):
+    for frame, im in zip(range(frame_start, frame_start + len(ims)), ims):
       full_ims[frame] = im
     
     samples_fg = ret['samples_pred_fg'][:, 0]
@@ -437,13 +438,13 @@ if __name__ == '__main__':
       x.samples = np.clip(x.samples, -1., 1.)
       return x
 
-    print 'Writing to:', arg.out
+    print('Writing to:', arg.out)
     ut.save(pj(arg.out, 'ret%s.pk' % name), ret)
     ut.make_video(full_ims, pr.fps, pj(arg.out, 'fg%s.mp4' % name), snd(full_samples_fg))
     ut.make_video(full_ims, pr.fps, pj(arg.out, 'bg%s.mp4' % name), snd(full_samples_bg))
     ut.make_video(full_ims, pr.fps, pj(arg.out, 'src%s.mp4' % name), snd(full_samples_src))
   else:
-    print 'Not writing, since --out was not set'
+    print('Not writing, since --out was not set')
 
-  print 'Video results:'
+  print('Video results:')
   ig.show(table)

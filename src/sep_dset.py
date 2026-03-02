@@ -1,5 +1,6 @@
-import tensorflow as tf, aolib.util as ut, numpy as np, os, time, sys, tfutil
-import tensorflow.contrib.slim as slim
+import tensorflow.compat.v1 as tf, aolib.util as ut, numpy as np, os, time, sys, tfutil
+tf.disable_v2_behavior()
+import tf_slim as slim
 import tensorflow.contrib.ffmpeg as ffmpeg
 
 cifar_path = '../data/cifar-10'
@@ -27,7 +28,7 @@ def read_example(rec_queue, pr, input_types):
       feats['im_0'] = tf.FixedLenFeature([], dtype=tf.string)
       feats['im_1'] = tf.FixedLenFeature([], dtype=tf.string)
     else:
-      for i in xrange(pr.num_splits):
+      for i in range(pr.num_splits):
         feats['im_%d' % i] = tf.FixedLenFeature([], dtype=tf.string)
         feats['num_frames_%d' % i] = tf.FixedLenFeature([1], dtype=tf.int64)
   if 'sfs' in input_types:
@@ -58,7 +59,7 @@ def read_example(rec_queue, pr, input_types):
                               tf.image.decode_jpeg(example['im_1'], channels = 3, name = 'decode_im2')]), 0)
     else:
       groups = []
-      for i in xrange(pr.num_splits):
+      for i in range(pr.num_splits):
         im = tf.image.decode_jpeg(example['im_%d' % i], channels = 3, name = 'decode_im%d' % i)
         frames = tf.cast(example['num_frames_%d' % i][0], tf.int32)
         #im.set_shape((full * frames, full, 3))
@@ -120,12 +121,12 @@ def read_example(rec_queue, pr, input_types):
   if pr.do_shift:
     choices = []
     max_frame = total_frames - num_slice_frames
-    frames1 = ([0] if pr.fix_frame else xrange(max_frame))
+    frames1 = ([0] if pr.fix_frame else range(max_frame))
     for frame1 in frames1:
       found = False
       for frame2 in reversed(range(max_frame)):
-        inv1 = xrange(frame1, frame1 + num_slice_frames)
-        inv2 = xrange(frame2, frame2 + num_slice_frames)
+        inv1 = range(frame1, frame1 + num_slice_frames)
+        inv2 = range(frame2, frame2 + num_slice_frames)
         if len(set(inv1).intersection(inv2)) <= pr.max_intersection:
           found = True
           choices.append([frame1, frame2])
@@ -135,7 +136,7 @@ def read_example(rec_queue, pr, input_types):
         pass
       else:
         assert found
-    print 'Number of frame choices:', len(choices)
+    print('Number of frame choices:', len(choices))
     choices = tf.constant(np.array(choices), dtype = tf.int32)
     idx = tf.random_uniform([1], 0, shape(choices, 0), dtype = tf.int64)[0]
     start_frame_gt = choices[idx, 0]
@@ -152,7 +153,7 @@ def read_example(rec_queue, pr, input_types):
   if hasattr(pr, 'resize_dims'):
     ims = tf.image.resize_images(ims, pr.resize_dims)
   if pr.augment_ims:
-    print 'Augment:', pr.augment_ims
+    print('Augment:', pr.augment_ims)
     # todo: handle flow by concatenating ims with flow
     r = tf.random_uniform(
       [2], 0, shape(ims, 1) - pr.crop_im_dim, dtype = tf.int32)
@@ -189,7 +190,7 @@ def read_example(rec_queue, pr, input_types):
   def slice_samples(frame):
     start = round_int(pr.samples_per_frame * cast_float(frame))
     if pr.augment_audio:
-      print 'samples shape:', shape(samples)
+      print('samples shape:', shape(samples))
       start0 = start# (+ 168659 41341) 210000
       dist = 3#int(0.05*pr.fps)
       delta = tf.random_uniform(
@@ -231,13 +232,13 @@ def read_example(rec_queue, pr, input_types):
 
   if pr.multi_shift:
     new_samples = [samples_exs[0], samples_exs[1]]
-    for i in xrange(pr.num_shifts):
+    for i in range(pr.num_shifts):
       idx = tf.random_uniform([1], 0, shape(choices, 0), dtype = tf.int64)[0]
       # doesn't necessarily match gt frame in terms of suppression, but that's prob ok...
       frame = choices[idx, 1]
       new_samples.append(slice_samples(frame))
     samples_exs = tf.concat([ed(xx, 0) for xx in new_samples], 0)
-    print 'samples_exs shape:', shape(samples_exs)
+    print('samples_exs shape:', shape(samples_exs))
 
   # samples_exs = tf.Print(samples_exs, ['done samples_exs', shape(samples_exs)])
   # samples_exs = tf.Print(samples_exs, ['done ims', shape(ims)])
@@ -257,7 +258,7 @@ def get_rec_files(path, needs_done_file):
   return rec_files
 
 def rec_files_from_path(path, num_db_files = None):
-  print 'Path:', path
+  print('Path:', path)
   if path.endswith('.txt'):
     rec_files = ut.read_lines(path)
     rec_files = filter(os.path.exists, rec_files)[:num_db_files]
@@ -267,7 +268,7 @@ def rec_files_from_path(path, num_db_files = None):
   
 def make_db_reader(path, pr, batch_size, input_types, db_start = None,
                    num_db_files = None, num_threads = 12, one_pass = False):
-  print 'one pass =', one_pass
+  print('one pass =', one_pass)
   if not os.path.exists(path):
     raise RuntimeError('Data path does not exist: %s' % path)
 

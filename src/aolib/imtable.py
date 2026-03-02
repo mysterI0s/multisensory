@@ -30,7 +30,7 @@ def show_table(table, title = None, rows_per_page = 100, show = False,
   use_www = use_www and get_www_path() is not None and os.path.exists(get_www_path())
   
   if (base_dir is not None) and (not os.path.exists(base_dir)):
-    print >>sys.stderr, 'base directory', base_dir, 'does not exist'
+    print('base directory', base_dir, 'does not exist', file=sys.stderr)
     base_dir = None
 
   # figure out the output directory from the arguments
@@ -46,7 +46,7 @@ def show_table(table, title = None, rows_per_page = 100, show = False,
     output_dir = ut.make_temp_dir(dir = base_dir)
   else:
     if base_dir is not None:
-      print 'Ignoring base_dir since output_path is set'
+      print('Ignoring base_dir since output_path is set')
     # clear output_path and use it
     if os.path.exists(output_path):
       # todo: make this quiet when if fails
@@ -81,13 +81,13 @@ def show_table(table, title = None, rows_per_page = 100, show = False,
   if use_www:
     url = os.path.join(get_url(), os.path.split(output_dir)[1])
     #symlink_fname = 'file://%s' % os.path.abspath(os.path.join(symlink_dir, 'index.html'))
-    print 'showing', url, '->', output_dir
+    print('showing', url, '->', output_dir)
     # if show:
     #   show_page(symlink_fname)
     os.system('chmod -R a+rwx %s' % output_dir)
     return url
   else:
-    print 'showing', ('file://%s' % os.path.abspath(fnames[0]))
+    print('showing', ('file://%s' % os.path.abspath(fnames[0])))
     if show:
       show_page(fnames[0])
     return fnames[0]
@@ -95,14 +95,14 @@ def show_table(table, title = None, rows_per_page = 100, show = False,
   if 0:
     # Save table and return HTML; don't paginate
     fname = paginate_table(html_rows, None, title, output_dir)[0]
-    print 'showing', ('file://%s' % os.path.abspath(fname))
+    print('showing', ('file://%s' % os.path.abspath(fname)))
 
   if archive:
     dirname = os.path.split(output_dir.rstrip('/'))[1]
     zip_name = dirname + '.zip'
     # make a zip file with a single directory containing files, not a long path by changing cwd temporarily
     os.system('cd %s/..; zip -qr %s %s' % (output_dir, zip_name, dirname))
-    print 'saved', os.path.abspath(output_dir.rstrip('/')  + '.zip')
+    print('saved', os.path.abspath(output_dir.rstrip('/')  + '.zip'))
 
   
     
@@ -243,9 +243,9 @@ def paginate_table(table_rows, rows_per_page, title, output_dir):
     rows_per_page = int(1e100)
   split_table = list(ut.split_n(table_rows, rows_per_page))
   #html_pages = [ut.make_temp('.html', dir = output_dir) for x in split_table]
-  page_names = ['index.html'] + ['page_%d.html' % i for i in xrange(2, 1+len(split_table))]
+  page_names = ['index.html'] + ['page_%d.html' % i for i in range(2, 1+len(split_table))]
   page_paths = [os.path.join(output_dir, fname) for fname in page_names]
-  for i in xrange(len(split_table)):
+  for i in range(len(split_table)):
     table_html = '<table border = 1><tr>' + '\n<tr>'.join(split_table[i]) + '</table>'
     footer = None
     if len(split_table) == 1:
@@ -254,7 +254,7 @@ def paginate_table(table_rows, rows_per_page, title, output_dir):
       footer = ''
       footer += ("Back " if i == 0 else "<a href = '%s'>Back</a> " % page_names[i-1])
       footer += ("Next " if i == -1 + len(page_names) else "<a href = '%s'>Next</a> " % page_names[i+1])
-      for j in xrange(len(split_table)):
+      for j in range(len(split_table)):
         s = '<b>%d</b>' % (1+j) if (i == j) else str(1+j)
         footer += ("<a href = '%s'>%s</a> " % (page_names[j], s))
       footer += '<br><br><br><br>'
@@ -365,7 +365,8 @@ def html_from_cell(x, output_dir):
   
 #   return seq_fname
 
-def save_helper((fname, x)):
+def save_helper(args):
+  fname, x = args
   ig.save(fname, x)
   
 # note: I think duration = #ticks before image changes, and 0.5 probably gets mapped to 0? I'm not sure.  Setting it to 1 makes it very fast, 100 much slower.
@@ -375,8 +376,8 @@ def make_temp_animated_gif_cmdline(seq, duration = 0.5, dir = None, tmp_ext = '.
   # avoid ffmpeg prompt
   os.system('rm %s' % seq_fname)
   base = ut.make_temp('')
-  #fnames = ['%s_%d.jpg' % (base, i) for i in xrange(len(seq))]
-  fnames = ['%s_%04d%s' % (base, i, tmp_ext) for i in xrange(len(seq))]
+  #fnames = ['%s_%d.jpg' % (base, i) for i in range(len(seq))]
+  fnames = ['%s_%04d%s' % (base, i, tmp_ext) for i in range(len(seq))]
   
   # for fname, x in zip(fnames, seq):
   #   ig.save(fname, x)
@@ -443,7 +444,8 @@ def pad_im_even(x):
     x = ig.pad_corner(x, x.shape[1] % 2, x.shape[0] % 2)
   return x
 
-def make_video_helper((i, x, in_dir, tmp_ext)):
+def make_video_helper(args):
+  i, x, in_dir, tmp_ext = args
   out_fname = ut.pjoin(in_dir, 'ao-video-frame%05d%s' % (i, tmp_ext))
   if type(x) == type(''):
     f = open(out_fname, 'wb')
@@ -511,7 +513,7 @@ def make_video(out_fname, ims, fps, tmp_ext = '.ppm', sound = None):
     cmd = ('ffmpeg -loglevel error -f image2 -r %f -i %s/ao-video-frame%%05d%s %s '
            '-pix_fmt yuv420p -ar 22050 -vcodec h264 -strict -2 -y %s') % (fps, in_dir, tmp_ext, sound_flags, out_fname)
   
-    print cmd
+    print(cmd)
     if 0 == os.system(cmd):
       for x in glob.glob(ut.pjoin(in_dir, 'ao-video-frame*%s' % tmp_ext)):
         os.remove(x)
@@ -524,7 +526,7 @@ def convert_video(in_fname, out_fname):
   #        '-pix_fmt yuv420p -vcodec h264 -acodec aac -strict -2 -y %s') % (in_fname, out_fname)
   cmd = ('ffmpeg -loglevel fatal -i "%s" '
          '-pix_fmt yuv420p -vcodec h264  -strict -2 -y %s') % (in_fname, out_fname)
-  print cmd
+  print(cmd)
   os.system(cmd)
   
 def test_video_cycle():
@@ -533,7 +535,7 @@ def test_video_cycle():
          '/afs/csail.mit.edu/u/a/aho/me_cropped.jpg']
   ims = [ig.load(x)[:120,:120] for x in ims]
   show([Video(ims)])
-  print 'cycle'
+  print('cycle')
   show([Cycle(ims, None)])
   #show([Video(map(ig.load, ims))])
 
@@ -548,12 +550,12 @@ def sync_with_fps(ims, timestamps, target_fps, max_lag_sec = 0.06):
     #print video_time(), timestamps[i]
     # We're over time; skip frames until we catch up with the timestamps
     while i < len(timestamps) and video_time() > timestamps[i] + max_lag_sec:
-      print 'Over time. Skipping frames to catch up.'
+      print('Over time. Skipping frames to catch up.')
       i += 1
 
     # We're far ahead of the true time.  Keep showing the same image until we reach it again.
     while video_time() < timestamps[i] - max_lag_sec:
-      print 'Under time. Repeating the last frame to slow down.'
+      print('Under time. Repeating the last frame to slow down.')
       vid.append(ims[i])
 
     i += 1
