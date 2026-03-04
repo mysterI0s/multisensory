@@ -41,13 +41,13 @@ def griffin_lim(spec,
                 num_iters = 1):
                 #num_iters = 20):
                 #num_iters = 10):
-  invert_spec = lambda spec : tf.contrib.signal.inverse_stft(spec, frame_length, frame_step, num_fft)
+  invert_spec = lambda spec : tf.signal.inverse_stft(spec, frame_length, frame_step, num_fft)
 
   spec_mag = tf.cast(tf.abs(spec), dtype=tf.complex64)
   best = tf.identity(spec)
   for i in range(num_iters):
     samples = invert_spec(best)
-    est = tf.contrib.signal.stft(samples, frame_length, frame_step, num_fft, pad_end = False)  # (1, T, n_fft/2+1)
+    est = tf.signal.stft(samples, frame_length, frame_step, num_fft, pad_end = False)  # (1, T, n_fft/2+1)
     phase = est / tf.cast(tf.maximum(1e-8, tf.abs(est)), tf.complex64) 
     best = spec_mag * phase
   X_t = invert_spec(best)
@@ -86,7 +86,7 @@ def stft_num_fft(pr): return int(2**np.ceil(np.log2(stft_frame_length(pr))))
 def stft(samples, pr):
   tracks = []
   for i in range(shape(samples, -1)):
-    spec = tf.contrib.signal.stft(samples[..., i], 
+    spec = tf.signal.stft(samples[..., i], 
                                  frame_length = stft_frame_length(pr),
                                  frame_step = stft_frame_step(pr))
     spec, spec_mag, spec_phase = pack_spec(spec, pr)

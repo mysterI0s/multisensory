@@ -885,7 +885,7 @@ def print_vals(name, x):
   return tf.Print(x, [name, tf.reduce_min(x), tf.reduce_max(x)])
 
 def stft(samples, pr):
-  spec_complex = tf.contrib.signal.stft(
+  spec_complex = tf.signal.stft(
     samples, 
     frame_length = soundrep.stft_frame_length(pr),
     frame_step = soundrep.stft_frame_step(pr),
@@ -907,7 +907,7 @@ def make_complex(mag, phase):
 def istft(mag, phase, pr):
   if pr.log_spec:
     mag = soundrep.amp_from_db(mag)
-  samples = tf.contrib.signal.inverse_stft(
+  samples = tf.signal.inverse_stft(
     make_complex(mag, phase), 
     frame_length = soundrep.stft_frame_length(pr),
     frame_step = soundrep.stft_frame_step(pr),
