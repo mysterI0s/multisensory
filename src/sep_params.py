@@ -13,7 +13,7 @@ def base_path():
 
 
 def pretrain_path():
-    return "../results/nets/sep"
+    return "/content/results/nets/sep"
 
 
 def base(name, num_gpus=1, batch_size=6, vid_dur=None, samp_sr=21000.0, resdir=None):

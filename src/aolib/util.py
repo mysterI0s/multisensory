@@ -76,7 +76,7 @@ def flatten(lists):
 
 
 def with_file(fname, f):
-    r = file(fname)
+    r = open(fname)
     try:
         ret = f(r)
         r.close()
@@ -180,7 +180,7 @@ def ordered(u, v):
 
 
 def make_file(fname, contents=""):
-    f = file(fname, "w")
+    f = open(fname, "w")
     f.write(contents)
     f.close()
 
@@ -522,7 +522,7 @@ class yield_list:
 
 @yield_list
 def read_lines(fname, keep_empty_lines=True, strip_newline=True, max_lines=None):
-    f = file(fname)
+    f = open(fname)
     for i, line in enumerate(f):
         if max_lines is not None and i >= max_lines:
             break
@@ -533,7 +533,7 @@ def read_lines(fname, keep_empty_lines=True, strip_newline=True, max_lines=None)
 
 def write_lines(fname, lines):
     assert type(lines) != type("")
-    f = file(fname, "w")
+    f = open(fname, "w")
     for line in lines:
         f.write(line)
         f.write("\n")
@@ -541,7 +541,7 @@ def write_lines(fname, lines):
 
 
 def blank_file(fname):
-    f = file(fname, "w")
+    f = open(fname, "w")
     f.close()
 
 
@@ -833,7 +833,7 @@ def parse_space_delim(s, parse_item=lambda x: x):
 
 
 def read_file(fname):
-    f = file(fname)
+    f = open(fname)
     s = f.read()
     f.close()
     return s
@@ -1810,15 +1810,15 @@ def listdir_full(dir):
 def save(fname, x):
     if x.__class__.__name__ == "AsyncMapResult":
         raise RuntimeError("Error: tried to save AsyncMapResult")
-    f = file(fname, "w")
-    pickle.dump(x, f, 2)
-    f.close()
+    # Python 3: Must use 'wb' (write binary) for pickle
+    with open(fname, "wb") as f:
+        pickle.dump(x, f, 2)
 
 
 def load(fname):
-    f = file(fname, "r")
-    x = pickle.load(f)
-    f.close()
+    # Python 3: Must use 'rb' (read binary) for pickle
+    with open(fname, "rb") as f:
+        x = pickle.load(f)
     return x
 
 
@@ -2943,7 +2943,7 @@ def save_ply(fname, pts, colors=None, show_cmd=False, nsample=None):
         colors = [(255, 255, 255)] * len(pts)
     info = "Date: %s" % datetime.datetime.today().strftime("%I:%M %p %a")
 
-    with open(fname, "w") as f:
+    with open(fname, "wb") as f:
         header = """\
 ply
 format ascii 1.0
@@ -3909,7 +3909,7 @@ def argsort_confint(pos_totals):
 
 def afs_readable():
     try:
-        f = file("/afs/csail.mit.edu/u/a/aho/test.jpg", "rb")
+        f = open("/afs/csail.mit.edu/u/a/aho/test.jpg", "rb")
         f.close()
         return True
     except:

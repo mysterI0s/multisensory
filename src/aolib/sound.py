@@ -430,7 +430,7 @@ class Sound:
 
     def save(self, fname):
         s = self.unnormalized("int16")
-        scipy.io.wavfile.write(fname, s.rate, s.samples)
+        scipy.io.wavfile.write(fname, int(s.rate), s.samples)
 
     def resampled(self, new_rate, clip=True):
         import subband

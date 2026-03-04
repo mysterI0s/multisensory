@@ -136,7 +136,7 @@ class NetClf:
         # num_times = 1
         if 1:
             f = min(ims.shape[1:3])
-            ims = np.array([ig.scale(im, (f, f)) for im in ims])
+            ims = np.array([ig.resize(im, (f, f)) for im in ims])
             d = int(224.0 / 256 * ims.shape[1])
             print("d =", d, ims.shape)
             full = None
@@ -250,7 +250,7 @@ def heatmap(frames, cam, lo_frac=0.5, adapt=True, max_val=35):
         r = min(1 + l, cam.shape[0] - 1)
         p = f - l
         frame_cam = ((1 - p) * cam[l]) + (p * cam[r])
-        frame_cam = ig.scale(frame_cam, im.shape[:2], 1)
+        frame_cam = ig.resize(frame_cam, im.shape[:2], 1)
         # vis = ut.cmap_im(pylab.cm.hot, np.minimum(frame_cam, hi), lo = lo, hi = hi)
         vis = ut.cmap_im(pylab.cm.jet, frame_cam, lo=lo, hi=hi)
         # p = np.clip((frame_cam - lo)/float(hi - lo), 0, 1.)
@@ -282,7 +282,7 @@ def crop_from_cam(ims, cam, pr):
     y0 = int(np.clip(y - h / 2, 0, ims.shape[1] - h))
     x0 = int(np.clip(x - w / 2, 0, ims.shape[2] - w))
     crop = ims[:, y0 : y0 + h, x0 : x0 + w]
-    crop = np.array([ig.scale(im, (pr.crop_im_dim, pr.crop_im_dim)) for im in crop])
+    crop = np.array([ig.resize(im, (pr.crop_im_dim, pr.crop_im_dim)) for im in crop])
     return crop
 
 
@@ -327,8 +327,12 @@ def run(vid_file, start_time, dur, pr, gpu, buf=0.05, mask=None, arg=None, net=N
         )
 
         if arg.fullres:
-            fulls = map(
-                ig.load, sorted(ut.glob(vid_path, "full_*.png"))[: pr.sampled_frames]
+            # FIX: Wrap map() in list() so np.array creates a proper array
+            fulls = list(
+                map(
+                    ig.load,
+                    sorted(ut.glob(vid_path, "full_*.png"))[: pr.sampled_frames],
+                )
             )
             fulls = np.array(fulls)
 
@@ -339,10 +343,34 @@ def run(vid_file, start_time, dur, pr, gpu, buf=0.05, mask=None, arg=None, net=N
         if samples_src.shape[0] < pr.num_samples:
             return None
 
-        ims = map(ig.load, sorted(ut.glob(vid_path, "small_*.png")))
+        # ims = map(ig.load, sorted(ut.glob(vid_path, "small_*.png")))
+        # ims = np.array(ims)
+        # d = 224
+        # y = x = ims.shape[1] / 2 - d / 2
+        # ims = ims[:, y : y + d, x : x + d]
+        # ims = ims[: pr.sampled_frames]
+
+        img_files = sorted(ut.glob(vid_path, "small_*.png"))
+
+        if not img_files:
+            print(
+                f"ERROR: No frames were extracted to {vid_path}. Check if FFmpeg is installed and the video file path is correct."
+            )
+            return None
+
+        ims = [ig.load(f) for f in img_files]
         ims = np.array(ims)
+
+        # Safety check for shape
+        if ims.ndim < 2:
+            print(
+                f"ERROR: ims has unexpected shape {ims.shape}. Expected 4D (frames, h, w, c)."
+            )
+            return None
+
         d = 224
-        y = x = ims.shape[1] / 2 - d / 2
+        # Use integer division // for Python 3.12 compatibility
+        y = x = ims.shape[1] // 2 - d // 2
         ims = ims[:, y : y + d, x : x + d]
         ims = ims[: pr.sampled_frames]
 

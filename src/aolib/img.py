@@ -19,7 +19,7 @@ except ImportError:
 
 
 def show(*args, **kwargs):
-    import imtable
+    from . import imtable
 
     return imtable.show(*args, **kwargs)
 
