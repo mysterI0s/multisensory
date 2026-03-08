@@ -36,25 +36,26 @@ class UNetEncoder(nn.Module):
 
     Each layer: Conv2d → BN → LeakyReLU(0.2)
     Strides: conv1-2: [1,2]; conv3-9: 2.
-    Activation values are stored for skip connections.
+    Activations are stored for skip connections. Video features are concatenated
+    before conv4, conv5, and conv6 if net_style != 'no-im'.
     """
 
-    def __init__(self):
+    def __init__(self, net_style='full'):
         super().__init__()
+        self.net_style = net_style
         bn = _unet_bn_params()
 
-        # (spec+phase) → conv1 → ... → conv9
-        # Input: 2 channels (magnitude + phase)
         self.layers = nn.ModuleList()
         self.bns = nn.ModuleList()
 
+        v = (net_style != 'no-im')
         channels = [
             (2,   64,  4, (1, 2)),   # conv1
             (64,  128, 4, (1, 2)),   # conv2
             (128, 256, 4, 2),        # conv3
-            (256, 512, 4, 2),        # conv4  (merge_level 0 after)
-            (512, 512, 4, 2),        # conv5  (merge_level 1 after)
-            (512, 512, 4, 2),        # conv6  (merge_level 2 after)
+            (320 if v else 256, 512, 4, 2),  # conv4 (vid scale 0 added before this: +64)
+            (640 if v else 512, 512, 4, 2),  # conv5 (vid scale 1 added before this: +128)
+            (1024 if v else 512, 512, 4, 2), # conv6 (vid scale 2 added before this: +512)
             (512, 512, 4, 2),        # conv7
             (512, 512, 4, 2),        # conv8
             (512, 512, 4, 2),        # conv9
@@ -63,31 +64,20 @@ class UNetEncoder(nn.Module):
         for i, (c_in, c_out, k, s) in enumerate(channels):
             if isinstance(s, tuple):
                 stride = s
-                pad = (k // 2 - 1, k // 2)  # approx SAME padding
             else:
                 stride = (s, s)
-                pad = (k // 2 - 1, k // 2 - 1)
             self.layers.append(
                 nn.Conv2d(c_in, c_out, k, stride=stride, padding=0, bias=False)
             )
             self.bns.append(nn.BatchNorm2d(c_out, **bn))
 
-        # Weight init: random normal(0, 0.02) to match TF
         for layer in self.layers:
             nn.init.normal_(layer.weight, 0.0, 0.02)
         for bn_layer in self.bns:
-            nn.init.normal_(bn_layer.weight, 1.0, 0.02)  # gamma
+            nn.init.normal_(bn_layer.weight, 1.0, 0.02)
             nn.init.zeros_(bn_layer.bias)
 
     def forward(self, x):
-        """
-        Args:
-            x: (B, 2, T, F) concatenated normalized spec + phase
-
-        Returns:
-            encoded: final encoded features
-            activations: list of pre-activation outputs for skip connections
-        """
         activations = []
         strides_list = [
             (1, 2), (1, 2), (2, 2), (2, 2), (2, 2),
@@ -95,7 +85,6 @@ class UNetEncoder(nn.Module):
         ]
 
         for i, (conv, bn) in enumerate(zip(self.layers, self.bns)):
-            # Manual SAME-like padding
             stride = strides_list[i]
             k = 4
             ph = max(k - 1, 0)
@@ -108,9 +97,8 @@ class UNetEncoder(nn.Module):
 
             x = conv(x)
             x = bn(x)
-            activations.append(x)  # Pre-activation values (before leaky relu)
+            activations.append(x)
             x = F.leaky_relu(x, 0.2)
-
         return x, activations
 
 
@@ -119,32 +107,25 @@ class UNetDecoder(nn.Module):
     Decoder with 8 transposed convolutional layers.
 
     Each layer: ReLU(concat(x, skip)) → ConvTranspose2d → BN
-
-    The first deconv (deconv1) does NOT concatenate with a skip (concat=False).
     """
 
-    def __init__(self):
+    def __init__(self, net_style='full'):
         super().__init__()
         bn = _unet_bn_params()
 
-        # Decoder layers  (in_ch, out_ch, kernel, stride)
-        # Note: in_ch for layers with skip = out_ch_prev + skip_ch
-        # deconv1: no concat, input is 512
-        # deconv2-8: with concat
         self.deconvs = nn.ModuleList()
         self.bns = nn.ModuleList()
 
-        # (input_channels, output_channels, kernel, stride)
-        # Input channels account for skip concatenation
+        v = (net_style != 'no-im')
         decoder_spec = [
-            (512,       512, 4, 2),     # deconv1 (no concat)
-            (512 + 512, 512, 4, 2),     # deconv2
-            (512 + 512, 512, 4, 2),     # deconv3
-            (512 + 512, 512, 4, 2),     # deconv4
-            (512 + 512, 512, 4, 2),     # deconv5
-            (512 + 256, 256, 4, 2),     # deconv6
-            (256 + 128, 128, 4, (1, 2)),  # deconv7
-            (128 + 64,  64,  4, (1, 2)),  # deconv8
+            (512,       512, 4, 2),     # deconv1 (no skip)
+            (512 + 512, 512, 4, 2),     # deconv2 (skip: conv8_out)
+            (512 + 512, 512, 4, 2),     # deconv3 (skip: conv7_out)
+            (512 + 512, 512, 4, 2),     # deconv4 (skip: conv6_out)
+            (1536 if v else 1024, 512, 4, 2),     # deconv5 (skip: enc5_merged = 512 + 512)
+            (1152 if v else 768, 256, 4, 2),      # deconv6 (skip: enc4_merged = 512 + 128)
+            (576 if v else 384, 128, 4, (1, 2)),  # deconv7 (skip: enc3_merged = 256 + 64)
+            (256 if v else 192,  64,  4, (1, 2)),  # deconv8 (skip: conv2_out = 128)
         ]
 
         for i, (c_in, c_out, k, s) in enumerate(decoder_spec):
@@ -158,7 +139,6 @@ class UNetDecoder(nn.Module):
             )
             self.bns.append(nn.BatchNorm2d(c_out, **bn))
 
-        # Weight init
         for layer in self.deconvs:
             nn.init.normal_(layer.weight, 0.0, 0.02)
         for bn_layer in self.bns:
@@ -166,20 +146,8 @@ class UNetDecoder(nn.Module):
             nn.init.zeros_(bn_layer.bias)
 
     def forward(self, x, activations):
-        """
-        Args:
-            x: encoded features from encoder
-            activations: list of encoder activations (for skip connections)
-                         activations[0] is from conv1, ..., activations[8] is from conv9
-
-        Returns:
-            x: decoded features
-            last_skip: the activation used for the output heads (not popped)
-        """
-        # Skip connections: activations are in order conv1..conv9
-        # Decoder uses them in reverse: conv8, conv7, conv6, conv5, conv4, conv3, conv2, conv1
-        skips = list(activations[:-1])  # Exclude last (conv9: no skip for deconv1)
-        skips.reverse()  # Now: conv8, conv7, conv6, conv5, conv4, conv3, conv2, conv1
+        skips = list(activations[:-1])
+        skips.reverse()  # conv8, conv7, conv6, conv5, conv4, conv3, conv2, conv1
 
         strides_list = [
             (2, 2), (2, 2), (2, 2), (2, 2), (2, 2),
@@ -187,19 +155,15 @@ class UNetDecoder(nn.Module):
         ]
 
         for i, (deconv, bn) in enumerate(zip(self.deconvs, self.bns)):
-            # Concatenate with skip (except deconv1)
             if i > 0:
                 skip = skips[i - 1]
                 x = torch.cat([x, skip], dim=1)
 
             x = F.relu(x)
 
-            # ConvTranspose with padding to match TF output sizes
             x = deconv(x)
-            # Trim to match expected output size (TF SAME transpose padding)
             stride = strides_list[i]
             k = 4
-            # Remove excess padding from transposed convolution
             crop_h = k - stride[0]
             crop_w = k - stride[1]
             if crop_h > 0:
@@ -208,11 +172,9 @@ class UNetDecoder(nn.Module):
             if crop_w > 0:
                 cw = crop_w // 2
                 x = x[:, :, :, cw:x.shape[3] - (crop_w - cw)]
-
             x = bn(x)
 
-        # The last skip is reused for output heads (do_pop=False in TF)
-        last_skip = skips[-1]  # conv1 activation
+        last_skip = skips[-1]
         return x, last_skip
 
 
@@ -233,14 +195,8 @@ class OutputHead(nn.Module):
         nn.init.zeros_(self.deconv.bias)
 
     def forward(self, x, skip):
-        """
-        Args:
-            x: decoder output
-            skip: first encoder activation (for concatenation)
-        """
         x = F.relu(torch.cat([x, skip], dim=1))
         x = self.deconv(x)
-        # Trim to match expected spatial size
         k = 4
         crop_h = k - self.stride[0]
         crop_w = k - self.stride[1]

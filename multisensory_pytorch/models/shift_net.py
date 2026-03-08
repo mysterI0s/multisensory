@@ -39,15 +39,15 @@ class SoundFeatureNet(nn.Module):
     2D convolutional network for raw audio waveform features.
 
     Architecture:
-        normalize → unsqueeze → conv1(65×1, s=4) → pool(4×1) →
+        normalize → transpose → conv1(65×1, s=4) → pool(4×1) →
         block2(128, 15×1, s=4×1) → block3(128, 15×1, s=4×1) →
         block4(256, 15×1, s=4×1)
     """
 
     def __init__(self, bn_momentum=_BN_MOMENTUM, bn_eps=_BN_EPS):
         super().__init__()
-        # Input: (batch, 1, time, features) after unsqueeze
-        self.conv1 = Conv2dSame(1, 64, (65, 1), stride=(4, 1), bias=False)
+        # Input: (batch, channels=2, time, 1) after transpose/unsqueeze
+        self.conv1 = Conv2dSame(2, 64, (65, 1), stride=(4, 1), bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=bn_momentum, eps=bn_eps)
         self.pool1 = nn.MaxPool2d((4, 1), stride=(4, 1))
 
@@ -61,14 +61,15 @@ class SoundFeatureNet(nn.Module):
     def forward(self, sfs):
         """
         Args:
-            sfs: (batch, time, channels) raw audio samples
+            sfs: (batch, time, channels) raw audio samples (stereo: channels=2)
 
         Returns:
-            (batch, 256, time', channels') feature map
+            (batch, 256, time', 1) feature map
         """
-        # Normalize and reshape to (batch, 1, time, channels)
         x = _normalize_sfs(sfs)
-        x = x.unsqueeze(1)  # (B, 1, T, C)
+        # Reshape to (batch, channels, time, 1) for 2D conv
+        x = x.transpose(1, 2)  # (B, 2, T)
+        x = x.unsqueeze(3)     # (B, 2, T, 1)
 
         x = F.relu(self.bn1(self.conv1(x)))
         x = self.pool1(x)
@@ -76,7 +77,7 @@ class SoundFeatureNet(nn.Module):
         x = self.block2(x)
         x = self.block3(x)
         x = self.block4(x)
-        return x  # (B, 256, T', C')
+        return x  # (B, 256, T', 1)
 
 
 # ---------------------------------------------------------------------------
