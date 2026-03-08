@@ -1,0 +1,26 @@
+# Multisensory PyTorch - Dependencies
+# Core
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+numpy>=1.24.0
+
+# Audio
+soundfile>=0.12.0
+librosa>=0.10.0
+
+# Image processing
+Pillow>=9.0.0
+scipy>=1.10.0
+
+# Training
+tensorboard>=2.12.0
+
+# Video (inference)
+# ffmpeg must be installed system-wide
+
+# Weight conversion (optional — only needed to convert TF checkpoints)
+# tensorflow>=2.12.0
+
+# Testing
+pytest>=7.0.0
