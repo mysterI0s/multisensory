@@ -253,6 +253,66 @@ def convert_checkpoint(tf_checkpoint_path, name_map, is_deconv_set=None):
 
 
 # ---------------------------------------------------------------------------
+# Path resolution helper
+# ---------------------------------------------------------------------------
+
+def resolve_checkpoint_path(path):
+    """
+    Resolve a TF checkpoint path, trying several common base directories.
+
+    TF checkpoints consist of 3 files:
+        path.data-00000-of-00001, path.index, path.meta
+    We check for the .index file to verify the path is valid.
+
+    Args:
+        path: user-provided checkpoint path (absolute or relative)
+
+    Returns:
+        Resolved absolute path (without extension)
+
+    Raises:
+        FileNotFoundError if the checkpoint cannot be found
+    """
+    # 1. Try as-is (absolute path or valid relative path)
+    if os.path.exists(path + ".index") or os.path.exists(path + ".data-00000-of-00001"):
+        return os.path.abspath(path)
+
+    # 2. Try common base directories
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Go up from scripts/ → multisensory_pytorch/ → multisensory/
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+
+    candidates = [
+        os.path.join(project_root, path),                           # multisensory/<path>
+        os.path.join(project_root, path.lstrip("../")),             # strip leading ../
+        os.path.join(project_root, path.lstrip("..\\").lstrip("/")),
+        os.path.join(project_root, "results", *path.split("results/")[-1:]) if "results" in path else None,
+    ]
+
+    # Also try relative to CWD
+    candidates.append(os.path.join(os.getcwd(), path))
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        candidate = os.path.normpath(candidate)
+        if os.path.exists(candidate + ".index") or os.path.exists(candidate + ".data-00000-of-00001"):
+            print(f"  Resolved checkpoint path: {candidate}")
+            return candidate
+
+    # Show helpful error
+    raise FileNotFoundError(
+        f"Could not find TF checkpoint: {path}\n"
+        f"  Tried:\n"
+        f"    - {os.path.abspath(path)}\n"
+        f"    - {os.path.join(project_root, path)}\n"
+        f"  Please provide the full absolute path to the checkpoint.\n"
+        f"  Example: /content/multisensory/results/nets/shift/net.tf-650000\n"
+        f"  The checkpoint should have .index and .data-00000-of-00001 files."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -261,66 +321,104 @@ def main():
         description="Convert TF checkpoints to PyTorch state_dict"
     )
     parser.add_argument("--tf_checkpoint", type=str, required=True,
-                        help="Path to TF checkpoint (e.g., ../results/nets/shift/net.tf-650000)")
+                        help="Path to TF checkpoint. Can be absolute "
+                             "(e.g., /content/multisensory/results/nets/shift/net.tf-650000) "
+                             "or relative to the multisensory project root.")
     parser.add_argument("--output", type=str, required=True,
                         help="Output .pt file path")
     parser.add_argument("--model_type", type=str, required=True,
-                        choices=["shift", "sourcesep"],
-                        help="Which model to convert")
+                        choices=["shift", "sourcesep", "cam", "sep-large"],
+                        help="Which model to convert: shift, sourcesep (full/unet-pit), "
+                             "cam, sep-large")
     parser.add_argument("--list_vars", action="store_true",
                         help="List TF checkpoint variables and exit")
     args = parser.parse_args()
 
+    # Resolve checkpoint path
+    try:
+        ckpt_path = resolve_checkpoint_path(args.tf_checkpoint)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+
     if args.list_vars:
         import tensorflow as tf
-        reader = tf.train.load_checkpoint(args.tf_checkpoint)
+        reader = tf.train.load_checkpoint(ckpt_path)
+        print(f"\nVariables in {ckpt_path}:")
         for name, shape in sorted(reader.get_variable_to_shape_map().items()):
-            print(f"  {name}: {shape}")
+            dtype = reader.get_variable_to_dtype_map()[name]
+            print(f"  {name}: {shape}  ({dtype.name})")
+        total = len(reader.get_variable_to_shape_map())
+        print(f"\nTotal: {total} variables")
         return
 
-    print(f"Converting {args.model_type} from {args.tf_checkpoint}")
+    print(f"Converting {args.model_type} from {ckpt_path}")
 
-    if args.model_type == "shift":
+    # Select name map and deconv set based on model type
+    if args.model_type in ("shift", "cam"):
         name_map = build_shift_name_map()
         is_deconv = set()
-    elif args.model_type == "sourcesep":
+    elif args.model_type in ("sourcesep", "sep-large"):
         name_map = build_sourcesep_name_map()
-        # Mark deconv layers
         is_deconv = {f'gen/deconv{i + 1}/weights' for i in range(8)}
         is_deconv.add('gen/fg/weights')
         is_deconv.add('gen/bg/weights')
     else:
         raise ValueError(f"Unknown model_type: {args.model_type}")
 
-    state_dict = convert_checkpoint(args.tf_checkpoint, name_map, is_deconv)
+    state_dict = convert_checkpoint(ckpt_path, name_map, is_deconv)
 
     # Save
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    out_dir = os.path.dirname(os.path.abspath(args.output))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     torch.save(state_dict, args.output)
-    print(f"Saved PyTorch state_dict to {args.output}")
+    print(f"Saved PyTorch state_dict to {os.path.abspath(args.output)}")
 
-    # Verify loading
-    print("\nVerifying...")
-    if args.model_type == "shift":
-        from ..models.shift_net import ShiftNet
-        from ..utils.params import shift_v1
-        model = ShiftNet(shift_v1())
-    else:
-        from ..models.sourcesep import SourceSepUNet
-        from ..utils.params import sep_full
-        model = SourceSepUNet(sep_full())
+    # Verify loading into model
+    print("\nVerifying state_dict can be loaded into the model...")
+    try:
+        # Use absolute imports so this works both as standalone script
+        # and as python -m multisensory_pytorch.scripts.convert_weights
+        try:
+            from multisensory_pytorch.models.shift_net import ShiftNet
+            from multisensory_pytorch.models.sourcesep import SourceSepUNet
+            from multisensory_pytorch.utils.params import shift_v1, sep_full
+        except ImportError:
+            # Fallback: add parent dirs to path for standalone execution
+            parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            grandparent = os.path.dirname(parent)
+            if parent not in sys.path:
+                sys.path.insert(0, grandparent)
+            from multisensory_pytorch.models.shift_net import ShiftNet
+            from multisensory_pytorch.models.sourcesep import SourceSepUNet
+            from multisensory_pytorch.utils.params import shift_v1, sep_full
 
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
-    print(f"Missing keys ({len(missing)}):")
-    for k in missing[:10]:
-        print(f"  {k}")
-    if len(missing) > 10:
-        print(f"  ... and {len(missing) - 10} more")
-    print(f"Unexpected keys ({len(unexpected)}):")
-    for k in unexpected[:10]:
-        print(f"  {k}")
-    if len(unexpected) > 10:
-        print(f"  ... and {len(unexpected) - 10} more")
+        if args.model_type in ("shift", "cam"):
+            model = ShiftNet(shift_v1())
+        else:
+            model = SourceSepUNet(sep_full())
+
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        print(f"  Missing keys ({len(missing)}):")
+        for k in missing[:20]:
+            print(f"    {k}")
+        if len(missing) > 20:
+            print(f"    ... and {len(missing) - 20} more")
+        print(f"  Unexpected keys ({len(unexpected)}):")
+        for k in unexpected[:20]:
+            print(f"    {k}")
+        if len(unexpected) > 20:
+            print(f"    ... and {len(unexpected) - 20} more")
+
+        total_params = sum(p.numel() for p in model.parameters())
+        loaded_params = sum(state_dict[k].numel() for k in state_dict)
+        print(f"\n  Model params: {total_params:,}")
+        print(f"  Loaded params: {loaded_params:,}")
+
+    except Exception as e:
+        print(f"  WARNING: Could not verify (non-fatal): {e}")
+        print("  The state_dict was still saved successfully.")
 
     print("\n✅ Conversion complete!")
 
