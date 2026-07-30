@@ -553,7 +553,7 @@ if __name__ == "__main__":
 
     if arg.out is not None:
         ut.mkdir(arg.out)
-        vid_s = arg.vid_file.split("/")[-1].split(".mp4")[0]
+        vid_s = os.path.splitext(os.path.basename(arg.vid_file))[0]
         mask_s = "" if arg.mask is None else "_%s" % arg.mask
         cam_s = "" if not arg.cam else "_cam"
         suffix_s = "" if arg.suffix == "" else "_%s" % arg.suffix

@@ -1210,7 +1210,10 @@ def make_temp(ext, contents=None, dir=None):
 # def nfs_dir(): return '/data/vision/billf/aho-vis/tmp'
 # def nfs_dir(): return '/data/vision/scratch/billf/aho/tmp'
 def nfs_dir():
-    return "/tmp"
+    # Prefer /tmp on Unix; fall back to the system temp dir (needed on Windows).
+    if os.path.isdir("/tmp"):
+        return "/tmp"
+    return tempfile.gettempdir()
 
 
 def make_temp_nfs(ext, contents=None):
@@ -3873,7 +3876,11 @@ def make_video(im_fnames, fps, out_fname, sound_fname=None, flags=""):
                 ig.save(fname, x)
             im_fnames = tmp_ims
 
-        write_lines(input_file, ["file %s" % fname for fname in im_fnames])
+        # ffmpeg concat treats \ as escapes; use forward slashes + quotes
+        write_lines(
+            input_file,
+            ["file '%s'" % os.path.abspath(fname).replace("\\", "/") for fname in im_fnames],
+        )
         sound_flags_in = ('-i "%s"' % sound_fname) if sound_fname is not None else ""
         sound_flags_out = "-acodec aac" if sound_fname is not None else ""
         # os.system('echo input file; cat %s' % input_file)

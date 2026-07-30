@@ -538,7 +538,7 @@ class Params(ut.Struct):
 
     @property
     def name(self):
-        return ut.add_slash(self.resdir).split("/")[-2]
+        return os.path.basename(os.path.normpath(self.resdir))
 
 
 def find_lr_np(pr, step):
