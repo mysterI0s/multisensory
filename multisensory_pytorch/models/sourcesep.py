@@ -16,14 +16,20 @@ import numpy as np
 import math
 
 from ..utils.audio import (
-    stft, istft, normalize_spec, unnormalize_spec,
-    normalize_phase, unnormalize_phase, db_from_amp
+    stft,
+    istft,
+    normalize_spec,
+    unnormalize_spec,
+    normalize_phase,
+    unnormalize_phase,
+    db_from_amp,
 )
 
 
 # ---------------------------------------------------------------------------
 # U-Net building blocks
 # ---------------------------------------------------------------------------
+
 
 def _unet_bn_params():
     """BN parameters matching the TF unet_arg_scope (decay=0.9997, eps=1e-5)."""
@@ -40,7 +46,7 @@ class UNetEncoder(nn.Module):
     before conv4, conv5, and conv6 if net_style != 'no-im'.
     """
 
-    def __init__(self, net_style='full'):
+    def __init__(self, net_style="full"):
         super().__init__()
         self.net_style = net_style
         bn = _unet_bn_params()
@@ -48,17 +54,32 @@ class UNetEncoder(nn.Module):
         self.layers = nn.ModuleList()
         self.bns = nn.ModuleList()
 
-        v = (net_style != 'no-im')
+        v = net_style != "no-im"
         channels = [
-            (2,   64,  4, (1, 2)),   # conv1
-            (64,  128, 4, (1, 2)),   # conv2
-            (128, 256, 4, 2),        # conv3
-            (320 if v else 256, 512, 4, 2),  # conv4 (vid scale 0 added before this: +64)
-            (640 if v else 512, 512, 4, 2),  # conv5 (vid scale 1 added before this: +128)
-            (1024 if v else 512, 512, 4, 2), # conv6 (vid scale 2 added before this: +512)
-            (512, 512, 4, 2),        # conv7
-            (512, 512, 4, 2),        # conv8
-            (512, 512, 4, 2),        # conv9
+            (2, 64, 4, (1, 2)),  # conv1
+            (64, 128, 4, (1, 2)),  # conv2
+            (128, 256, 4, 2),  # conv3
+            (
+                320 if v else 256,
+                512,
+                4,
+                2,
+            ),  # conv4 (vid scale 0 added before this: +64)
+            (
+                640 if v else 512,
+                512,
+                4,
+                2,
+            ),  # conv5 (vid scale 1 added before this: +128)
+            (
+                1024 if v else 512,
+                512,
+                4,
+                2,
+            ),  # conv6 (vid scale 2 added before this: +512)
+            (512, 512, 4, 2),  # conv7
+            (512, 512, 4, 2),  # conv8
+            (512, 512, 4, 2),  # conv9
         ]
 
         for i, (c_in, c_out, k, s) in enumerate(channels):
@@ -77,11 +98,18 @@ class UNetEncoder(nn.Module):
             nn.init.normal_(bn_layer.weight, 1.0, 0.02)
             nn.init.zeros_(bn_layer.bias)
 
-    def forward(self, x):
+    def forward(self, x, vid_scales=None, conditioner=None):
         activations = []
         strides_list = [
-            (1, 2), (1, 2), (2, 2), (2, 2), (2, 2),
-            (2, 2), (2, 2), (2, 2), (2, 2)
+            (1, 2),
+            (1, 2),
+            (2, 2),
+            (2, 2),
+            (2, 2),
+            (2, 2),
+            (2, 2),
+            (2, 2),
+            (2, 2),
         ]
 
         for i, (conv, bn) in enumerate(zip(self.layers, self.bns)):
@@ -93,12 +121,26 @@ class UNetEncoder(nn.Module):
             pad_bottom = ph - pad_top
             pad_left = pw // 2
             pad_right = pw - pad_left
-            x = F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
+            x_pad = F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
 
-            x = conv(x)
-            x = bn(x)
-            activations.append(x)
-            x = F.leaky_relu(x, 0.2)
+            # Pre-relu layer output
+            x_pre = conv(x_pad)
+            x_pre = bn(x_pre)
+            activations.append(x_pre)
+
+            # Post-relu
+            x = F.leaky_relu(x_pre, 0.2)
+
+            # Merge Video Features AFTER conv3 (i=2), conv4 (i=3), conv5 (i=4)
+            if vid_scales is not None and conditioner is not None:
+                if i in [2, 3, 4]:
+                    scale_idx = i - 2
+                    if scale_idx < len(vid_scales):
+                        x = conditioner.merge(x, vid_scales[scale_idx], None)
+                        # Replicate TF quirk: merge_level overwrites the pre-relu skip connection
+                        # with the POST-relu audio+video concatenated tensor
+                        activations[-1] = x
+
         return x, activations
 
 
@@ -109,23 +151,28 @@ class UNetDecoder(nn.Module):
     Each layer: ReLU(concat(x, skip)) → ConvTranspose2d → BN
     """
 
-    def __init__(self, net_style='full'):
+    def __init__(self, net_style="full"):
         super().__init__()
         bn = _unet_bn_params()
 
         self.deconvs = nn.ModuleList()
         self.bns = nn.ModuleList()
 
-        v = (net_style != 'no-im')
+        v = net_style != "no-im"
         decoder_spec = [
-            (512,       512, 4, 2),     # deconv1 (no skip)
-            (512 + 512, 512, 4, 2),     # deconv2 (skip: conv8_out)
-            (512 + 512, 512, 4, 2),     # deconv3 (skip: conv7_out)
-            (512 + 512, 512, 4, 2),     # deconv4 (skip: conv6_out)
-            (1536 if v else 1024, 512, 4, 2),     # deconv5 (skip: enc5_merged = 512 + 512)
-            (1152 if v else 768, 256, 4, 2),      # deconv6 (skip: enc4_merged = 512 + 128)
-            (576 if v else 384, 128, 4, (1, 2)),  # deconv7 (skip: enc3_merged = 256 + 64)
-            (256 if v else 192,  64,  4, (1, 2)),  # deconv8 (skip: conv2_out = 128)
+            (512, 512, 4, 2),  # deconv1 (no skip)
+            (512 + 512, 512, 4, 2),  # deconv2 (skip: conv8_out)
+            (512 + 512, 512, 4, 2),  # deconv3 (skip: conv7_out)
+            (512 + 512, 512, 4, 2),  # deconv4 (skip: conv6_out)
+            (1536 if v else 1024, 512, 4, 2),  # deconv5 (skip: enc5_merged = 512 + 512)
+            (1152 if v else 768, 256, 4, 2),  # deconv6 (skip: enc4_merged = 512 + 128)
+            (
+                576 if v else 384,
+                128,
+                4,
+                2,
+            ),  # deconv7 (skip: enc3_merged = 256 + 64)
+            (256 if v else 192, 64, 4, (1, 2)),  # deconv8 (skip: conv2_out = 128)
         ]
 
         for i, (c_in, c_out, k, s) in enumerate(decoder_spec):
@@ -134,8 +181,7 @@ class UNetDecoder(nn.Module):
             else:
                 stride = (s, s)
             self.deconvs.append(
-                nn.ConvTranspose2d(c_in, c_out, k, stride=stride, padding=0,
-                                   bias=False)
+                nn.ConvTranspose2d(c_in, c_out, k, stride=stride, padding=0, bias=False)
             )
             self.bns.append(nn.BatchNorm2d(c_out, **bn))
 
@@ -149,32 +195,36 @@ class UNetDecoder(nn.Module):
         skips = list(activations[:-1])
         skips.reverse()  # conv8, conv7, conv6, conv5, conv4, conv3, conv2, conv1
 
-        strides_list = [
-            (2, 2), (2, 2), (2, 2), (2, 2), (2, 2),
-            (2, 2), (1, 2), (1, 2)
-        ]
-
         for i, (deconv, bn) in enumerate(zip(self.deconvs, self.bns)):
             if i > 0:
                 skip = skips[i - 1]
+                # Trim x to exactly match the skip tensor dimensions
+                diff_h = x.size(2) - skip.size(2)
+                diff_w = x.size(3) - skip.size(3)
+                if diff_h > 0:
+                    x = x[:, :, diff_h // 2 : x.size(2) - (diff_h - diff_h // 2), :]
+                if diff_w > 0:
+                    x = x[:, :, :, diff_w // 2 : x.size(3) - (diff_w - diff_w // 2)]
+
+                # Check channel dimensions. If skip has video features concatenated
+                # (e.g. at enc_merged levels), skip will have MORE channels than x
+                # The deconv in_channels array expects this exact concatenated tensor.
                 x = torch.cat([x, skip], dim=1)
 
             x = F.relu(x)
-
             x = deconv(x)
-            stride = strides_list[i]
-            k = 4
-            crop_h = k - stride[0]
-            crop_w = k - stride[1]
-            if crop_h > 0:
-                ch = crop_h // 2
-                x = x[:, :, ch:x.shape[2] - (crop_h - ch), :]
-            if crop_w > 0:
-                cw = crop_w // 2
-                x = x[:, :, :, cw:x.shape[3] - (crop_w - cw)]
             x = bn(x)
 
         last_skip = skips[-1]
+
+        # Trim final output x to precisely match last_skip
+        diff_h = x.size(2) - last_skip.size(2)
+        diff_w = x.size(3) - last_skip.size(3)
+        if diff_h > 0:
+            x = x[:, :, diff_h // 2 : x.size(2) - (diff_h - diff_h // 2), :]
+        if diff_w > 0:
+            x = x[:, :, :, diff_w // 2 : x.size(3) - (diff_w - diff_w // 2)]
+
         return x, last_skip
 
 
@@ -189,8 +239,9 @@ class OutputHead(nn.Module):
         if isinstance(stride, int):
             stride = (stride, stride)
         self.stride = stride
-        self.deconv = nn.ConvTranspose2d(in_channels, 2, 4, stride=stride,
-                                          padding=0, bias=True)
+        self.deconv = nn.ConvTranspose2d(
+            in_channels, 2, 4, stride=stride, padding=0, bias=True
+        )
         nn.init.normal_(self.deconv.weight, 0.0, 0.02)
         nn.init.zeros_(self.deconv.bias)
 
@@ -202,16 +253,17 @@ class OutputHead(nn.Module):
         crop_w = k - self.stride[1]
         if crop_h > 0:
             ch = crop_h // 2
-            x = x[:, :, ch:x.shape[2] - (crop_h - ch), :]
+            x = x[:, :, ch : x.shape[2] - (crop_h - ch), :]
         if crop_w > 0:
             cw = crop_w // 2
-            x = x[:, :, :, cw:x.shape[3] - (crop_w - cw)]
+            x = x[:, :, :, cw : x.shape[3] - (crop_w - cw)]
         return x
 
 
 # ---------------------------------------------------------------------------
 # Video-conditioned merge at different U-Net levels
 # ---------------------------------------------------------------------------
+
 
 class VideoConditioner(nn.Module):
     """
@@ -245,8 +297,9 @@ class VideoConditioner(nn.Module):
 
         # Resize temporal dimension to match net
         if vid.shape[2] != net.shape[2]:
-            vid = F.interpolate(vid, size=(net.shape[2], 1),
-                                mode='bilinear', align_corners=False)
+            vid = F.interpolate(
+                vid, size=(net.shape[2], 1), mode="bilinear", align_corners=False
+            )
 
         # Tile across frequency dimension
         vid = vid.expand(-1, -1, -1, net.shape[3])  # (B, C_vid, T, F)
@@ -260,6 +313,7 @@ class VideoConditioner(nn.Module):
 # SourceSep U-Net: Full model
 # ---------------------------------------------------------------------------
 
+
 class SourceSepUNet(nn.Module):
     """
     U-Net for audio-visual source separation.
@@ -271,7 +325,7 @@ class SourceSepUNet(nn.Module):
     Output: separated foreground and background audio (spec + waveform)
     """
 
-    def __init__(self, pr, shift_net=None, net_style='full'):
+    def __init__(self, pr, shift_net=None, net_style="full"):
         """
         Args:
             pr: Params object
@@ -286,7 +340,7 @@ class SourceSepUNet(nn.Module):
 
         self.encoder = UNetEncoder()
         self.decoder = UNetDecoder()
-        self.conditioner = VideoConditioner() if net_style != 'no-im' else None
+        self.conditioner = VideoConditioner() if net_style != "no-im" else None
 
         # Output heads: fg and bg
         self.fg_head = OutputHead(64 + 64, stride=(1, 2))  # 64 decoder + 64 skip
@@ -303,14 +357,14 @@ class SourceSepUNet(nn.Module):
         Returns:
             scales: list of feature maps at different levels, or None
         """
-        if self.net_style == 'no-im' or self.shift_net is None:
+        if self.net_style == "no-im" or self.shift_net is None:
             return None
 
         with torch.no_grad():
-            if self.net_style == 'static':
+            if self.net_style == "static":
                 B, C, D, H, W = ims.shape
                 mid = D // 2
-                ims_static = ims[:, :, mid:mid + 1].expand(-1, -1, D, -1, -1)
+                ims_static = ims[:, :, mid : mid + 1].expand(-1, -1, D, -1, -1)
                 _, _, _, _, scales, _ = self.shift_net(ims_static, samples_trunc)
             else:
                 _, _, _, _, scales, _ = self.shift_net(ims, samples_trunc)
@@ -345,9 +399,9 @@ class SourceSepUNet(nn.Module):
             pred_spec = F.pad(pred_spec, (0, freq_diff), value=val)
 
         # Handle phase
-        if pr.phase_type == 'pred':
+        if pr.phase_type == "pred":
             pred_phase = torch.cat([pred_phase, phase[..., -1:]], dim=-1)
-        elif pr.phase_type == 'orig':
+        elif pr.phase_type == "orig":
             pred_phase = phase
         else:
             raise RuntimeError(f"Unknown phase_type: {pr.phase_type}")
@@ -379,23 +433,15 @@ class SourceSepUNet(nn.Module):
         vid_scales = self._get_video_features(ims, samples_trunc)
 
         # Prepare U-Net input: (B, 2, T, F)
-        spec_norm = normalize_spec(spec_mix, pr).unsqueeze(1)    # (B, 1, T, F)
+        spec_norm = normalize_spec(spec_mix, pr).unsqueeze(1)  # (B, 1, T, F)
         phase_norm = normalize_phase(phase_mix, pr).unsqueeze(1)  # (B, 1, T, F)
-        unet_input = torch.cat([spec_norm, phase_norm], dim=1)    # (B, 2, T, F)
+        unet_input = torch.cat([spec_norm, phase_norm], dim=1)  # (B, 2, T, F)
 
         # Truncate frequency dimension
-        unet_input = unet_input[:, :, :, :pr.freq_len]
+        unet_input = unet_input[:, :, :, : pr.freq_len]
 
-        # Encode
-        encoded, activations = self.encoder(unet_input)
-
-        # Merge video features at levels 3, 4, 5 (after conv3, conv4, conv5)
-        if vid_scales is not None and self.conditioner is not None:
-            for level_idx, enc_idx in enumerate([3, 4, 5]):
-                if level_idx < len(vid_scales):
-                    activations[enc_idx] = self.conditioner.merge(
-                        activations[enc_idx], vid_scales[level_idx], activations
-                    )
+        # Encode (video features are merged inside the encoder)
+        encoded, activations = self.encoder(unet_input, vid_scales, self.conditioner)
 
         # Decode
         decoded, last_skip = self.decoder(encoded, activations)
@@ -413,8 +459,12 @@ class SourceSepUNet(nn.Module):
         )
 
         return (
-            pred_spec_fg, pred_wav_fg, pred_phase_fg,
-            pred_spec_bg, pred_wav_bg, pred_phase_bg,
+            pred_spec_fg,
+            pred_wav_fg,
+            pred_phase_fg,
+            pred_spec_bg,
+            pred_wav_bg,
+            pred_phase_bg,
             vid_scales,
         )
 
@@ -422,6 +472,7 @@ class SourceSepUNet(nn.Module):
 # ---------------------------------------------------------------------------
 # NetClf: Inference wrapper (replaces sourcesep.NetClf)
 # ---------------------------------------------------------------------------
+
 
 class SourceSepClassifier:
     """
@@ -432,31 +483,41 @@ class SourceSepClassifier:
         result = clf.predict(ims, samples)
     """
 
-    def __init__(self, pr, weights_path, shift_weights_path=None,
-                 device='cpu', restore_only_shift=False):
+    def __init__(
+        self,
+        pr,
+        weights_path,
+        shift_weights_path=None,
+        device="cpu",
+        restore_only_shift=False,
+    ):
         self.pr = pr
         self.device = torch.device(device)
 
         # Build ShiftNet if needed
         shift_net = None
-        if pr.net_style != 'no-im' and shift_weights_path is not None:
+        if pr.net_style != "no-im" and shift_weights_path is not None:
             from .shift_net import ShiftNet
+
             shift_net = ShiftNet(pr).to(self.device)
-            shift_state = torch.load(shift_weights_path, map_location=self.device,
-                                     weights_only=True)
+            shift_state = torch.load(
+                shift_weights_path, map_location=self.device, weights_only=True
+            )
             if "model_state_dict" in shift_state:
                 shift_state = shift_state["model_state_dict"]
-            shift_net.load_state_dict(shift_state)
+            shift_net.load_state_dict(shift_state, strict=False)
             shift_net.eval()
 
         # Build SourceSep
-        self.model = SourceSepUNet(pr, shift_net=shift_net,
-                                    net_style=pr.net_style).to(self.device)
+        self.model = SourceSepUNet(pr, shift_net=shift_net, net_style=pr.net_style).to(
+            self.device
+        )
         self.model.eval()
 
         if weights_path.endswith(".pt"):
-            state_dict = torch.load(weights_path, map_location=self.device,
-                                    weights_only=True)
+            state_dict = torch.load(
+                weights_path, map_location=self.device, weights_only=True
+            )
             if "model_state_dict" in state_dict:
                 state_dict = state_dict["model_state_dict"]
             self.model.load_state_dict(state_dict, strict=False)
@@ -476,21 +537,23 @@ class SourceSepClassifier:
             dict with separated audio and spectrograms
         """
         import numpy as np
+
         pr = self.pr
 
         # Convert: NDHWC → NCDHW
         ims_t = torch.from_numpy(ims).permute(0, 4, 1, 2, 3).float().to(self.device)
-        samples_t = torch.from_numpy(samples).to(self.device)
+        samples_t = torch.from_numpy(samples).float().to(self.device)
 
         # Truncate samples
-        sample_len = getattr(pr, 'sample_len', None) or pr.num_samples
+        sample_len = getattr(pr, "sample_len", None) or pr.num_samples
         samples_trunc = samples_t[:, :sample_len]
 
         # Compute STFT
         from ..utils.audio import stft as audio_stft
+
         spec_mix, phase_mix = audio_stft(samples_trunc[:, :, 0], pr)
-        spec_mix = spec_mix[:, :pr.spec_len]
-        phase_mix = phase_mix[:, :pr.spec_len]
+        spec_mix = spec_mix[:, : pr.spec_len]
+        phase_mix = phase_mix[:, : pr.spec_len]
 
         # Also compute spectrogram of original mix for return
         spec_mix_ret = spec_mix.clone()

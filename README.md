@@ -1,98 +1,148 @@
-[[Paper]](https://arxiv.org/pdf/1804.03641.pdf)
-[[Project page]](http://andrewowens.com/multisensory)
+# Testing the "the Python 3 migration works" premise on a real video
 
-This repository contains code for the [paper](https://arxiv.org/pdf/1804.03641.pdf):
+The claim under test is *"the conversion from Python 2.7 works."* The author's
+evidence is `py_compile`, which only parses. These five tests escalate from
+"does it run" to "does it compute the same function as the released model."
 
-Andrew Owens, Alexei A. Efros. Audio-Visual Scene Analysis with Self-Supervised Multisensory Features. arXiv, 2018
+Run them in order. **Stop at the first failure** — every later test assumes the
+earlier ones passed.
 
-## Contents
-This release includes code and models for:
-- **On/off-screen source separation**: separating the speech of an on-screen speaker from background sounds.
-- **Blind source separation**: audio-only source separation using [u-net](https://arxiv.org/pdf/1505.04597.pdf) and [PIT](https://arxiv.org/pdf/1607.00325).
-- **Sound source localization**: visualizing the parts of a video that correspond to sound-making actions.
-- **Self-supervised audio-visual features**: a pretrained 3D CNN that can be used for downstream tasks (e.g. action recognition, source separation).
+| Test | Question | Needs model? | Needs TF 1.8 oracle? |
+|---|---|---|---|
+| T1 | Are there Py2 semantics that compile but break? | no | no |
+| T0 | Does it run end-to-end on `translator.mp4`? | yes | no |
+| T2 | **Is the model actually working?** | yes | **no** |
+| T3/T4 | Where exactly does it diverge? | yes | yes |
+| T5 | Does separation hit the paper's numbers? | yes | no |
+
+---
 
 ## Setup
-- Install [Python 2.7](https://www.python.org/download/releases/2.7)
-- Install [ffmpeg](https://www.ffmpeg.org/download.html)
-- Install [TensorFlow](https://www.tensorflow.org/), e.g. through pip:
+
 ```bash
-pip install tensorflow     # for CPU evaluation only
-pip install tensorflow-gpu # for GPU support
-```
-We used TensorFlow version 1.8, which can be installed with:
-```
-pip install tensorflow-gpu==1.8
+cd multisensory-master
+./download_models.sh        # -> results/nets/{shift,cam,sep,unet_pit}/net.tf-*
+./download_sample_data.sh   # -> data/translator.mp4, data/crossfire.mp4
+cp -r /path/to/mstest/* .
 ```
 
+`translator.mp4` is the right video to test on: it is the repo's own demo, the
+README documents the expected result, and reference outputs are published on
+YouTube so you have a qualitative check as well as a numeric one.
 
-- Install other python dependencies
+---
+
+## T1 — static audit (30 seconds, no dependencies)
+
 ```bash
-pip install numpy matplotlib pillow scipy
+python3 t1_py3_audit.py src/
 ```
-- Download the pretrained models and sample data
+
+Finds the four break classes `py_compile` cannot see: removed builtins,
+moved builtins, iterator-vs-list, and classic-vs-true division. Exits non-zero
+on any certain failure, so you can drop it straight into CI.
+
+---
+
+## T0 — smoke test
+
 ```bash
-./download_models.sh
-./download_sample_data.sh
+./t0_smoke.sh .
 ```
 
-## Pretrained audio-visual features
-We have provided the features for our fused audio-visual network. These features were learned through self-supervised learning. Please see [shift_example.py](src/shift_example.py) for a simple example that uses these pretrained features.
+Imports every module (which `py_compile` never did) and then runs all four
+README commands. Writes `t0_smoke.log` with full tracebacks.
 
-## Audio-visual source separation
-To try the on/off-screen source separation model, run:
+This distinguishes *crashes* from *runs*. It proves nothing about correctness —
+a model with scrambled padding runs perfectly happily.
+
+---
+
+## T2 — the pretext self-oracle ⭐ the one that actually settles it
+
 ```bash
-python sep_video.py ../data/translator.mp4 --model full --duration_mult 4 --out ../results/
+python t2_pretext_oracle.py --video data/translator.mp4 --trials 200
 ```
-This will separate a speaker's voice from that of an off-screen speaker. It will write the separated video files to `../results/`, and will also display them in a local webpage, for easier viewing. This produces the following videos (click to watch):
 
-| Input | On-screen | Off-screen |
-| ----- | --------- | ---------- |
-| <a href = "https://youtu.be/4kVNzxFeboo"><img src = "doc/translator_input.jpg" width = 200></a> | <a href = "https://youtu.be/XvJVXsHyBKw"><img src = "doc/translator_input.jpg" width = 200></a> | <a href = "https://youtu.be/NFll7nfmwO8"><img src = "doc/translator_input.jpg" width = 200></a> |
+**This is the key test, because it needs no reference implementation.**
 
-We can visually mask out one of the two on-screen speakers, thereby removing their voice:
+The model was trained (Eq. 1) so that aligned audio scores higher than audio
+shifted by 2.0–5.8 s. That objective is a built-in oracle: feed the same frames
+with aligned vs. shifted audio and check which gets the higher alignment logit.
+
+- **~50%** → broken. The checkpoint loads, the code runs, and the network is
+  computing garbage. This is exactly the failure mode that padding, BN, and
+  fusion-pooling bugs produce.
+- **well above chance** → the graph is wired correctly and the weights are
+  being applied. Move on to T3.
+
+The script reports a z-score against chance so you are not eyeballing it. With
+200 paired trials, chance SE is 3.5 pp, so anything above ~57% is significant.
+
+For a stronger result use a directory of clips rather than one video:
+
 ```bash
-python sep_video.py ../data/crossfire.mp4 --model full --mask l --out ../results/
-python sep_video.py ../data/crossfire.mp4 --model full --mask r --out ../results/
+python t2_pretext_oracle.py --video_dir /path/to/audioset_clips --trials 400
 ```
-This produces the following videos (click to watch):
 
-| Source | Left | Right |
-| ------ | ---- | ----- |
-| <a href = "https://youtu.be/H9CgWJToF_s"><img src="doc/crossfire_input.jpg" width="200"/></a> | <a href = "https://youtu.be/9jPaA8ttI6A"><img src="doc/crossfire_l.jpg" width="200"/></a> | <a href = "https://youtu.be/M4ACgIWuiWM"><img src="doc/crossfire_r.jpg" width="200"/></a> |
+Run T2 under **both** stacks. Two numbers, same protocol, directly comparable.
 
-## Blind (audio-only) source separation
-This baseline trains a [u-net](https://arxiv.org/pdf/1505.04597.pdf) model to minimize a [permutation invariant](https://arxiv.org/pdf/1607.00325) loss.
+---
+
+## T3 + T4 — layer-wise diff against the real TF 1.8 oracle
+
+T2 tells you *whether* it works. This tells you *where* it breaks.
+
 ```bash
-python sep_video.py ../data/translator.mp4 --model unet_pit --duration_mult 4 --out ../results/
-```
-The model will write the two separated streams in an arbitrary order.
+docker build -f Dockerfile.tf18 -t multisensory:tf18 .
 
-## Visualizing the locations of sound sources
-To view the self-supervised network's class activation map (CAM), use the `--cam` flag:
-```bash
-python sep_video.py ../data/translator.mp4 --model full --cam --out ../results/
-```
-This produces a video in which the CAM is overlaid as a heat map:
+# gold reference, and freeze the exact input tensors
+docker run --rm -v "$PWD":/work -w /work multisensory:tf18 \
+  python t3_dump_activations.py --repo_root /work \
+      --video data/translator.mp4 \
+      --save_input fixed_input.npz --out dump_tf18.npz
 
-<a href = "https://youtu.be/u99MdLBDnJc"><img src="doc/crossfire_cam.jpg" width="300"/></a>
+# migrated stack, byte-identical input
+python3 t3_dump_activations.py --repo_root . \
+      --load_input fixed_input.npz --out dump_py313.npz
 
-## Action recognition and fine-tuning
-We have provided example code for training an action recognition model (e.g. on the [UCF-101](http://crcv.ucf.edu/data/UCF101.php) dataset) in [videocls.py](src/videocls.py)). This involves fine-tuning our pretrained, audio-visual network. It is also possible to train this network with only visual data (no audio).
-
-## Citation
-If you use this code in your research, please consider citing our paper:
-```
-@article{multisensory2018,
-  title={Audio-Visual Scene Analysis with Self-Supervised Multisensory Features},
-  author={Owens, Andrew and Efros, Alexei A},
-  journal={arXiv preprint arXiv:1804.03641},
-  year={2018}
-}
+python3 t4_compare_dumps.py dump_tf18.npz dump_py313.npz --tol 1e-4
 ```
 
-## Updates
-- 11/08/18: Fixed a bug in the class activation map example code. Added Tensorflow 1.9 compatibility.
+`t3` also runs the forward pass twice and reports self-consistency. TF's
+eval-mode `fractional_max_pool` is seeded and should be bit-identical; if it is
+not, fix that before trusting any diff.
 
-## Acknowledgements
-Our *u*-net code draws from [this implementation](https://github.com/affinelayer/pix2pix-tensorflow) of [pix2pix](https://arxiv.org/abs/1611.07004).
+`t4` prints tensors in **forward order** and names the first divergence, so you
+get "broke at `im/conv1`" rather than "the logits are wrong." It maps common
+first-failure points to their likely cause.
+
+The same two scripts validate the PyTorch port later — dump from the PyTorch
+model into the same key names and diff against `dump_tf18.npz`.
+
+---
+
+## T5 — task-level numbers
+
+If T2 and T4 pass, confirm the released model reproduces its published results:
+
+- **Table 2**, on/off-screen separation: **11.4 dB on-screen / 7.0 dB off-screen**
+- **Section 5**, pretext accuracy on held-out AudioSet: **59.9%**
+- **Table 1**, UCF-101 split 1 fine-tuned: **82.1%**
+
+Build synthetic mixtures from disjoint-speaker VoxCeleb pairs (the paper's
+72/8/20 split), run `sep_video.py --model full`, and compute SDR. Anything near
+0 dB means the separation head is not working regardless of what T0 said.
+
+---
+
+## Interpreting the outcome
+
+| T0 | T2 | Meaning |
+|---|---|---|
+| fail | — | Migration incomplete. Fix the runtime errors T1 listed. |
+| pass | ~50% | **Worst case.** Runs cleanly, computes nonsense. Only T2 catches this. |
+| pass | above chance | Migration is real. Use T3/T4 to quantify residual drift. |
+
+The middle row is the whole reason to do this. A migration that runs is not a
+migration that works, and `py_compile` cannot tell the two apart.

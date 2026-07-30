@@ -1,0 +1,50 @@
+# Gold reference: the EXACT stack the checkpoint was trained and released on.
+#
+# You need this container for one reason only: to produce the ground-truth
+# activation dump that everything else is measured against. Nothing else in
+# your pipeline should depend on it.
+#
+#   docker build -f Dockerfile.tf18 -t multisensory:tf18 .
+#
+#   # CPU is fine for a single 4.2 s clip
+#   docker run --rm -it \
+#     -v "$PWD":/work -w /work \
+#     multisensory:tf18 \
+#     python t3_dump_activations.py \
+#         --repo_root /work \
+#         --video data/translator.mp4 \
+#         --save_input fixed_input.npz \
+#         --out dump_tf18.npz
+#
+# Then run the SAME command on your Python 3.13 host with
+#   --load_input fixed_input.npz --out dump_py313.npz
+# so both stacks see byte-identical input, and diff with t4_compare_dumps.py.
+
+FROM tensorflow/tensorflow:1.8.0-py3
+
+# The released checkpoint predates py3-only TF builds; the repo targets 2.7.
+# tensorflow/tensorflow:1.8.0 (no -py3 suffix) is the Python 2.7 image.
+# Swap the FROM line above to `tensorflow/tensorflow:1.8.0` if you want 2.7.
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsm6 \
+        libxext6 \
+        wget \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin everything. Unpinned pip against a 2018 interpreter will resolve to
+# wheels that do not exist or do not import.
+RUN pip install --no-cache-dir \
+        "numpy==1.14.5" \
+        "scipy==1.1.0" \
+        "pillow==5.2.0" \
+        "matplotlib==2.2.3"
+
+WORKDIR /work
+
+# Sanity check at build time so failures surface early, not mid-experiment.
+RUN python -c "import tensorflow as tf, numpy as np; \
+print('tf', tf.__version__); print('np', np.__version__); \
+assert tf.__version__.startswith('1.8')"

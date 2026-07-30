@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import math
 
 
 def _compute_same_padding(kernel_size, stride, dilation=1):
@@ -38,24 +39,36 @@ def _needs_explicit_pad(kernel_size, stride):
     return any(s > 1 for s in stride)
 
 
-def _pad_same_nd(x, kernel_size, stride, dims):
+def _pad_same_nd(x, kernel_size, stride, dilation=1):
     """
-    Apply TF-style 'SAME' padding (asymmetric) for stride > 1.
-    This is needed because PyTorch padding='same' only works with stride=1.
+    Apply TF-style 'SAME' padding dynamically based on input shape.
+    Formula:
+        out_size = ceil(in_size / stride)
+        pad_total = max((out_size - 1) * stride + effective_k - in_size, 0)
     """
-    if isinstance(kernel_size, int):
-        kernel_size = [kernel_size] * dims
-    if isinstance(stride, int):
-        stride = [stride] * dims
+    dims = len(kernel_size)
+    if isinstance(dilation, int):
+        dilation = [dilation] * dims
 
+    in_sizes = x.shape[-dims:]
     pad = []
-    for k, s in reversed(list(zip(kernel_size, stride))):
-        # TF SAME formula
-        pad_total = max(k - 1, 0)
+
+    # Loop from last spatial dim to first (for F.pad which expects W, H, D)
+    for i in reversed(range(dims)):
+        k = kernel_size[i]
+        s = stride[i]
+        d = dilation[i]
+        in_size = in_sizes[i]
+
+        effective_k = k + (k - 1) * (d - 1)
+        out_size = math.ceil(in_size / s)
+        pad_total = max((out_size - 1) * s + effective_k - in_size, 0)
+
         pad_beg = pad_total // 2
         pad_end = pad_total - pad_beg
         pad.extend([pad_beg, pad_end])
-    return F.pad(x, pad)
+
+    return F.pad(x, tuple(pad))
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +91,15 @@ class Block2D(nn.Module):
           → BN → ReLU → output
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=(3, 3),
-                 stride=1, bn_momentum=_BN_MOMENTUM, bn_eps=_BN_EPS):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=(3, 3),
+        stride=1,
+        bn_momentum=_BN_MOMENTUM,
+        bn_eps=_BN_EPS,
+    ):
         super().__init__()
         if isinstance(stride, int):
             self.stride = (stride, stride)
@@ -90,7 +110,7 @@ class Block2D(nn.Module):
         else:
             self.kernel_size = tuple(kernel_size)
 
-        self.needs_shortcut = (self.stride != (1, 1) or in_channels != out_channels)
+        self.needs_shortcut = self.stride != (1, 1) or in_channels != out_channels
 
         # Shortcut
         if self.needs_shortcut:
@@ -98,21 +118,34 @@ class Block2D(nn.Module):
                 self.shortcut = nn.MaxPool2d(kernel_size=1, stride=self.stride)
             else:
                 self.shortcut = nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, 1, stride=self.stride, bias=False),
+                    nn.Conv2d(
+                        in_channels, out_channels, 1, stride=self.stride, bias=False
+                    ),
                     nn.BatchNorm2d(out_channels, momentum=bn_momentum, eps=bn_eps),
                 )
         else:
             self.shortcut = nn.Identity()
 
         # Main path
-        pad1 = _compute_same_padding(self.kernel_size, (1, 1))
-        self.conv1 = nn.Conv2d(in_channels, out_channels, self.kernel_size,
-                               stride=self.stride, padding=pad1, bias=False)
+        if self.stride == (1, 1):
+            pad1 = _compute_same_padding(self.kernel_size, (1, 1))
+        else:
+            pad1 = 0
+
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            self.kernel_size,
+            stride=self.stride,
+            padding=pad1,
+            bias=False,
+        )
         self.bn1 = nn.BatchNorm2d(out_channels, momentum=bn_momentum, eps=bn_eps)
 
         pad2 = _compute_same_padding(self.kernel_size, (1, 1))
-        self.conv2 = nn.Conv2d(out_channels, out_channels, self.kernel_size,
-                               padding=pad2, bias=True)
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels, self.kernel_size, padding=pad2, bias=True
+        )
         # No BN after conv2 — BN applied after residual addition
 
         self.bn_out = nn.BatchNorm2d(out_channels, momentum=bn_momentum, eps=bn_eps)
@@ -122,7 +155,7 @@ class Block2D(nn.Module):
 
         # For stride > 1 with SAME padding, we need explicit padding
         if _needs_explicit_pad(self.kernel_size, self.stride):
-            out = _pad_same_nd(x, self.kernel_size, self.stride, dims=2)
+            out = _pad_same_nd(x, self.kernel_size, self.stride, 1)
             # Reset conv1 padding to 0 — we've already padded
             out = self.conv1(out)
         else:
@@ -147,9 +180,18 @@ class Block3D(nn.Module):
           → BN → ReLU → output  (or just ReLU if use_bn=False)
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=(3, 3, 3),
-                 stride=1, rate=1, bottleneck=False, use_bn=True,
-                 bn_momentum=_BN_MOMENTUM, bn_eps=_BN_EPS):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=(3, 3, 3),
+        stride=1,
+        rate=1,
+        bottleneck=False,
+        use_bn=True,
+        bn_momentum=_BN_MOMENTUM,
+        bn_eps=_BN_EPS,
+    ):
         super().__init__()
         if isinstance(stride, int):
             self.stride = (stride, stride, stride)
@@ -167,7 +209,7 @@ class Block3D(nn.Module):
             self.rate = tuple(rate)
 
         self.use_bn = use_bn
-        self.needs_shortcut = (self.stride != (1, 1, 1) or in_channels != out_channels)
+        self.needs_shortcut = self.stride != (1, 1, 1) or in_channels != out_channels
         self.bottleneck = bottleneck
 
         # Shortcut
@@ -176,7 +218,9 @@ class Block3D(nn.Module):
                 self.shortcut = nn.MaxPool3d(kernel_size=1, stride=self.stride)
             else:
                 self.shortcut = nn.Sequential(
-                    nn.Conv3d(in_channels, out_channels, 1, stride=self.stride, bias=False),
+                    nn.Conv3d(
+                        in_channels, out_channels, 1, stride=self.stride, bias=False
+                    ),
                     nn.BatchNorm3d(out_channels, momentum=bn_momentum, eps=bn_eps),
                 )
         else:
@@ -184,24 +228,43 @@ class Block3D(nn.Module):
 
         # Optional bottleneck
         if bottleneck:
-            self.bottleneck_conv = nn.Conv3d(in_channels, out_channels, 1,
-                                             dilation=self.rate, bias=False)
-            self.bottleneck_bn = nn.BatchNorm3d(out_channels, momentum=bn_momentum, eps=bn_eps)
+            self.bottleneck_conv = nn.Conv3d(
+                in_channels, out_channels, 1, dilation=self.rate, bias=False
+            )
+            self.bottleneck_bn = nn.BatchNorm3d(
+                out_channels, momentum=bn_momentum, eps=bn_eps
+            )
             conv1_in = out_channels
         else:
             conv1_in = in_channels
 
         # Main path — conv1
-        pad1 = _compute_same_padding(self.kernel_size, (1, 1, 1), self.rate)
-        self.conv1 = nn.Conv3d(conv1_in, out_channels, self.kernel_size,
-                               stride=self.stride, padding=pad1,
-                               dilation=self.rate, bias=False)
+        if self.stride == (1, 1, 1):
+            pad1 = _compute_same_padding(self.kernel_size, (1, 1, 1), self.rate)
+        else:
+            pad1 = 0
+
+        self.conv1 = nn.Conv3d(
+            conv1_in,
+            out_channels,
+            self.kernel_size,
+            stride=self.stride,
+            padding=pad1,
+            dilation=self.rate,
+            bias=False,
+        )
         self.bn1 = nn.BatchNorm3d(out_channels, momentum=bn_momentum, eps=bn_eps)
 
         # Main path — conv2 (no BN, no activation)
         pad2 = _compute_same_padding(self.kernel_size, (1, 1, 1), self.rate)
-        self.conv2 = nn.Conv3d(out_channels, out_channels, self.kernel_size,
-                               padding=pad2, dilation=self.rate, bias=True)
+        self.conv2 = nn.Conv3d(
+            out_channels,
+            out_channels,
+            self.kernel_size,
+            padding=pad2,
+            dilation=self.rate,
+            bias=True,
+        )
 
         # Post-addition BN
         if use_bn:
@@ -216,7 +279,7 @@ class Block3D(nn.Module):
 
         # For stride > 1 with SAME padding, explicit pad
         if _needs_explicit_pad(self.kernel_size, self.stride):
-            out = _pad_same_nd(out, self.kernel_size, self.stride, dims=3)
+            out = _pad_same_nd(out, self.kernel_size, self.stride, self.rate)
             out = self.conv1(out)
         else:
             out = self.conv1(out)
@@ -238,8 +301,9 @@ class Conv3dSame(nn.Module):
     Wraps nn.Conv3d with explicit asymmetric padding when stride > 1.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 dilation=1, bias=True):
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, dilation=1, bias=True
+    ):
         super().__init__()
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 3
@@ -257,14 +321,20 @@ class Conv3dSame(nn.Module):
         else:
             padding = 0  # We'll pad explicitly in forward
 
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size,
-                              stride=stride, padding=padding, dilation=dilation,
-                              bias=bias)
+        self.conv = nn.Conv3d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+        )
         self.needs_explicit_pad = any(s > 1 for s in stride)
 
     def forward(self, x):
         if self.needs_explicit_pad:
-            x = _pad_same_nd(x, self.kernel_size, self.stride, dims=3)
+            x = _pad_same_nd(x, self.kernel_size, self.stride, self.conv.dilation)
         return self.conv(x)
 
 
@@ -274,8 +344,9 @@ class Conv2dSame(nn.Module):
     Port of conv2d_same from tfutil.py.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 dilation=1, bias=True):
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, dilation=1, bias=True
+    ):
         super().__init__()
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
@@ -292,12 +363,18 @@ class Conv2dSame(nn.Module):
         else:
             padding = 0
 
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size,
-                              stride=stride, padding=padding, dilation=dilation,
-                              bias=bias)
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+        )
         self.needs_explicit_pad = any(s > 1 for s in stride)
 
     def forward(self, x):
         if self.needs_explicit_pad:
-            x = _pad_same_nd(x, self.kernel_size, self.stride, dims=2)
+            x = _pad_same_nd(x, self.kernel_size, self.stride, self.conv.dilation)
         return self.conv(x)

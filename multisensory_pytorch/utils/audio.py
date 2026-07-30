@@ -16,6 +16,7 @@ import math
 # STFT parameter helpers (from soundrep.py)
 # ---------------------------------------------------------------------------
 
+
 def stft_frame_length(pr):
     """Frame length in samples for STFT."""
     return int(pr.frame_length_ms * pr.samp_sr * 0.001)
@@ -34,6 +35,7 @@ def stft_num_fft(pr):
 # ---------------------------------------------------------------------------
 # STFT / iSTFT  (replaces tf.signal.stft / tf.signal.inverse_stft)
 # ---------------------------------------------------------------------------
+
 
 def stft(samples, pr):
     """
@@ -60,7 +62,7 @@ def stft(samples, pr):
         hop_length=hop,
         win_length=win_len,
         window=window,
-        center=False,          # TF pad_end=False is similar to center=False
+        center=False,  # TF pad_end=False is similar to center=False
         pad_mode="constant",
         return_complex=True,
     )
@@ -105,20 +107,37 @@ def istft(mag, phase, pr):
     win_len = stft_frame_length(pr)
     window = torch.hann_window(win_len, device=spec.device, dtype=torch.float32)
 
+    # Manually pad window to n_fft to explicitly bypass NOLA zero-boundary constraint
+    pad_left = (n_fft - win_len) // 2
+    pad_right = n_fft - win_len - pad_left
+    if pad_left > 0 or pad_right > 0:
+        window = F.pad(window, (pad_left, pad_right))
+    window = torch.clamp(window, min=1e-4)
+
     samples = torch.istft(
         spec,
         n_fft=n_fft,
         hop_length=hop,
-        win_length=win_len,
+        win_length=n_fft,  # Use n_fft because we artificially padded the window
         window=window,
         center=False,
     )
+
+    # Adjust final length manually (equivalent to TF missing length truncation)
+    target_length = getattr(pr, "sample_len", None) or pr.num_samples
+    if target_length is not None:
+        if samples.shape[-1] < target_length:
+            samples = F.pad(samples, (0, target_length - samples.shape[-1]))
+        elif samples.shape[-1] > target_length:
+            samples = samples[..., :target_length]
+
     return samples
 
 
 # ---------------------------------------------------------------------------
 # Griffin-Lim (from soundrep.py)
 # ---------------------------------------------------------------------------
+
 
 def griffin_lim(spec_complex, frame_length, frame_step, num_fft, num_iters=1):
     """
@@ -139,11 +158,20 @@ def griffin_lim(spec_complex, frame_length, frame_step, num_fft, num_iters=1):
     for _ in range(num_iters):
         # iSTFT
         best_t = best.transpose(-1, -2)  # (batch, freq, frames)
-        samples = torch.istft(best_t, num_fft, frame_step, frame_length, window, center=False)
+        samples = torch.istft(
+            best_t, num_fft, frame_step, frame_length, window, center=False
+        )
 
         # STFT of reconstructed signal
-        est = torch.stft(samples, num_fft, frame_step, frame_length, window,
-                         center=False, return_complex=True)
+        est = torch.stft(
+            samples,
+            num_fft,
+            frame_step,
+            frame_length,
+            window,
+            center=False,
+            return_complex=True,
+        )
         est = est.transpose(-1, -2)  # (batch, frames, freq)
 
         # Update phase
@@ -160,6 +188,7 @@ def griffin_lim(spec_complex, frame_length, frame_step, num_fft, num_iters=1):
 # dB / amplitude conversions (from soundrep.py)
 # ---------------------------------------------------------------------------
 
+
 def db_from_amp(x):
     """Convert amplitude to decibels: 20 * log10(max(x, 1e-5))."""
     return 20.0 * torch.log10(torch.clamp(x, min=1e-5))
@@ -174,6 +203,7 @@ def amp_from_db(x):
 # RMS normalization (from tfutil.py)
 # ---------------------------------------------------------------------------
 
+
 def normalize_rms(samples, desired_rms=0.1, eps=1e-4):
     """
     Normalize audio to a target RMS.
@@ -186,20 +216,21 @@ def normalize_rms(samples, desired_rms=0.1, eps=1e-4):
     Returns:
         Normalized samples
     """
-    rms = torch.sqrt(torch.mean(samples ** 2, dim=1, keepdim=True))
+    rms = torch.sqrt(torch.mean(samples**2, dim=1, keepdim=True))
     rms = torch.clamp(rms, min=eps)
     return samples * (desired_rms / rms)
 
 
 def normalize_rms_np(samples, desired_rms=0.1, eps=1e-4):
     """Numpy version of normalize_rms."""
-    rms = np.maximum(eps, np.sqrt(np.mean(samples ** 2, axis=1, keepdims=True)))
+    rms = np.maximum(eps, np.sqrt(np.mean(samples**2, axis=1, keepdims=True)))
     return samples * (desired_rms / rms)
 
 
 # ---------------------------------------------------------------------------
 # Image normalization (from tfutil.py)
 # ---------------------------------------------------------------------------
+
 
 def normalize_ims(im):
     """
@@ -212,7 +243,11 @@ def normalize_ims(im):
     Returns:
         float tensor in [-1, 1]
     """
-    im = im.float() if isinstance(im, torch.Tensor) else torch.tensor(im, dtype=torch.float32)
+    im = (
+        im.float()
+        if isinstance(im, torch.Tensor)
+        else torch.tensor(im, dtype=torch.float32)
+    )
     return -1.0 + (2.0 / 255.0) * im
 
 
@@ -225,6 +260,7 @@ def unnormalize_ims(im):
 # Sound feature normalization (from shift_net.py)
 # ---------------------------------------------------------------------------
 
+
 def normalize_sfs(sfs, scale=255.0):
     """
     Compress dynamic range of sound features (raw waveform samples).
@@ -236,12 +272,15 @@ def normalize_sfs(sfs, scale=255.0):
     Returns:
         Normalized features
     """
-    return torch.sign(sfs) * (torch.log1p(scale * torch.abs(sfs)) / math.log(1.0 + scale))
+    return torch.sign(sfs) * (
+        torch.log1p(scale * torch.abs(sfs)) / math.log(1.0 + scale)
+    )
 
 
 # ---------------------------------------------------------------------------
 # Spectrogram normalization (from sourcesep.py)
 # ---------------------------------------------------------------------------
+
 
 def norm_range(x, min_val, max_val):
     """Normalize to [-1, 1] given a known min/max range."""
@@ -276,6 +315,7 @@ def unnormalize_phase(phase, pr=None):
 # ---------------------------------------------------------------------------
 # Spectrogram packing for multi-track (from soundrep.py)
 # ---------------------------------------------------------------------------
+
 
 def pack_spec(spec_complex, pr):
     """
@@ -327,8 +367,9 @@ def stft_multi_track(samples, pr):
     tracks = []
     for i in range(samples.shape[-1]):
         channel = samples[..., i]
-        spec = torch.stft(channel, n_fft, hop, win_len, window,
-                          center=False, return_complex=True)
+        spec = torch.stft(
+            channel, n_fft, hop, win_len, window, center=False, return_complex=True
+        )
         spec = spec.transpose(-1, -2)  # (batch, frames, freq)
         _, spec_mag, spec_phase = pack_spec(spec, pr)
         tracks.append(spec_mag.unsqueeze(-1))

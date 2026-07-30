@@ -23,7 +23,9 @@ from .blocks import Block2D, Block3D, Conv3dSame, Conv2dSame, _BN_MOMENTUM, _BN_
 # ---------------------------------------------------------------------------
 def _normalize_sfs(sfs, scale=255.0):
     """Compress dynamic range: sign(x) * log(1 + scale*|x|) / log(1 + scale)."""
-    return torch.sign(sfs) * (torch.log1p(scale * torch.abs(sfs)) / math.log(1.0 + scale))
+    return torch.sign(sfs) * (
+        torch.log1p(scale * torch.abs(sfs)) / math.log(1.0 + scale)
+    )
 
 
 def _normalize_ims(im):
@@ -51,12 +53,15 @@ class SoundFeatureNet(nn.Module):
         self.bn1 = nn.BatchNorm2d(64, momentum=bn_momentum, eps=bn_eps)
         self.pool1 = nn.MaxPool2d((4, 1), stride=(4, 1))
 
-        self.block2 = Block2D(64, 128, (15, 1), stride=(4, 1),
-                              bn_momentum=bn_momentum, bn_eps=bn_eps)
-        self.block3 = Block2D(128, 128, (15, 1), stride=(4, 1),
-                              bn_momentum=bn_momentum, bn_eps=bn_eps)
-        self.block4 = Block2D(128, 256, (15, 1), stride=(4, 1),
-                              bn_momentum=bn_momentum, bn_eps=bn_eps)
+        self.block2 = Block2D(
+            64, 128, (15, 1), stride=(4, 1), bn_momentum=bn_momentum, bn_eps=bn_eps
+        )
+        self.block3 = Block2D(
+            128, 128, (15, 1), stride=(4, 1), bn_momentum=bn_momentum, bn_eps=bn_eps
+        )
+        self.block4 = Block2D(
+            128, 256, (15, 1), stride=(4, 1), bn_momentum=bn_momentum, bn_eps=bn_eps
+        )
 
     def forward(self, sfs):
         """
@@ -69,7 +74,7 @@ class SoundFeatureNet(nn.Module):
         x = _normalize_sfs(sfs)
         # Reshape to (batch, channels, time, 1) for 2D conv
         x = x.transpose(1, 2)  # (B, 2, T)
-        x = x.unsqueeze(3)     # (B, 2, T, 1)
+        x = x.unsqueeze(3)  # (B, 2, T, 1)
 
         x = F.relu(self.bn1(self.conv1(x)))
         x = self.pool1(x)
@@ -98,10 +103,12 @@ class ImageFeatureNet(nn.Module):
         self.bn1 = nn.BatchNorm3d(64, momentum=bn_momentum, eps=bn_eps)
         self.pool1 = nn.MaxPool3d((1, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1))
 
-        self.block2_1 = Block3D(64, 64, (3, 3, 3), stride=1,
-                                bn_momentum=bn_momentum, bn_eps=bn_eps)
-        self.block2_2 = Block3D(64, 64, (3, 3, 3), stride=2,
-                                bn_momentum=bn_momentum, bn_eps=bn_eps)
+        self.block2_1 = Block3D(
+            64, 64, (3, 3, 3), stride=1, bn_momentum=bn_momentum, bn_eps=bn_eps
+        )
+        self.block2_2 = Block3D(
+            64, 64, (3, 3, 3), stride=2, bn_momentum=bn_momentum, bn_eps=bn_eps
+        )
 
     def forward(self, ims):
         """
@@ -133,8 +140,14 @@ class MergeModule(nn.Module):
     with a residual connection.
     """
 
-    def __init__(self, sf_channels=256, im_channels=64, use_sound=True,
-                 bn_momentum=_BN_MOMENTUM, bn_eps=_BN_EPS):
+    def __init__(
+        self,
+        sf_channels=256,
+        im_channels=64,
+        use_sound=True,
+        bn_momentum=_BN_MOMENTUM,
+        bn_eps=_BN_EPS,
+    ):
         super().__init__()
         self.use_sound = use_sound
 
@@ -166,13 +179,10 @@ class MergeModule(nn.Module):
 
         if train:
             sf_net = F.fractional_max_pool2d(
-                sf_net, (ratio, 1.0),
-                output_size=(target_time, sf_net.shape[3])
+                sf_net, (ratio, 1.0), output_size=(target_time, sf_net.shape[3])
             )[0]
         else:
-            sf_net = F.adaptive_max_pool2d(
-                sf_net, (target_time, sf_net.shape[3])
-            )
+            sf_net = F.adaptive_max_pool2d(sf_net, (target_time, sf_net.shape[3]))
 
         # 2D conv on sound features
         sf_w = sf_net.shape[3]
@@ -310,7 +320,7 @@ class ShiftNetClassifier:
         logits, cam = clf.predict(ims, samples)
     """
 
-    def __init__(self, pr, weights_path, device='cpu'):
+    def __init__(self, pr, weights_path, device="cpu"):
         self.pr = pr
         self.device = torch.device(device)
         self.model = ShiftNet(pr, cam_mode=pr.cam).to(self.device)
@@ -318,8 +328,9 @@ class ShiftNetClassifier:
 
         # Load weights
         if weights_path.endswith(".pt"):
-            state_dict = torch.load(weights_path, map_location=self.device,
-                                    weights_only=True)
+            state_dict = torch.load(
+                weights_path, map_location=self.device, weights_only=True
+            )
             if "model_state_dict" in state_dict:
                 state_dict = state_dict["model_state_dict"]
             self.model.load_state_dict(state_dict)
@@ -338,8 +349,8 @@ class ShiftNetClassifier:
             cam: numpy array
         """
         # Convert NDHWC → NCDHW
-        ims_t = torch.from_numpy(ims).permute(0, 4, 1, 2, 3).to(self.device)
-        sfs_t = torch.from_numpy(samples).to(self.device)
+        ims_t = torch.from_numpy(ims).permute(0, 4, 1, 2, 3).float().to(self.device)
+        sfs_t = torch.from_numpy(samples).float().to(self.device)
 
         _, cam, _, _, _, _ = self.model(ims_t, sfs_t)
         return cam.cpu().numpy()
@@ -352,8 +363,12 @@ class ShiftNetClassifier:
         # Resize each frame
         B, C, D, H, W = ims_t.shape
         ims_flat = ims_t.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
-        ims_resized = F.interpolate(ims_flat, size=(pr.crop_im_dim, pr.crop_im_dim),
-                                     mode='bilinear', align_corners=False)
+        ims_resized = F.interpolate(
+            ims_flat,
+            size=(pr.crop_im_dim, pr.crop_im_dim),
+            mode="bilinear",
+            align_corners=False,
+        )
         ims_resized = ims_resized.reshape(B, D, C, pr.crop_im_dim, pr.crop_im_dim)
         ims_resized = ims_resized.permute(0, 2, 1, 3, 4)
 
