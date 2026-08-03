@@ -12,6 +12,12 @@ def base_path():
     return "../data"
 
 
+def results_root():
+    """Root of the results tree (checkpoints). Overridable so the model can
+    be loaded from a server checkout that is not the repo itself."""
+    return os.environ.get("MULTISENSORY_RESULTS", "../results")
+
+
 def pretrain_path():
     return "/results/nets/sep"
 
@@ -45,7 +51,7 @@ def base(name, num_gpus=1, batch_size=6, vid_dur=None, samp_sr=21000.0, resdir=N
         val_list=pj(base_path(), "celeb-tf-v6-full", "val/tf"),
         test_list=pj(base_path(), "celeb-tf-v6-full", "test/tf"),
         init_type="shift",
-        init_path="../results/nets/shift/net.tf-650000",
+        init_path=pj(results_root(), "nets", "shift", "net.tf-650000"),
         net_style="full",
         im_split=False,
         multi_shift=False,
@@ -100,6 +106,10 @@ def base(name, num_gpus=1, batch_size=6, vid_dur=None, samp_sr=21000.0, resdir=N
         phase_type="pred",
         alg="sourcesep",
         mono=False,
+        # Input level the net expects. Historically set in sep_video.main()
+        # only, so params built directly (server adapter, probes) silently
+        # missed it. It belongs to the model, so it lives here now.
+        input_rms=float(np.sqrt(0.1**2 + 0.1**2)),
     )
     pr.spec_len = 128 * int(2 ** np.round(np.log2(vid_dur / float(VidDur))))
     pr.num_samples = int(round(pr.samples_per_frame * pr.sampled_frames))

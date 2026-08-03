@@ -5,6 +5,10 @@ ab = os.path.abspath
 pj = ut.pjoin
 Params = mu.Params
 
+
+def results_root():
+    return os.environ.get("MULTISENSORY_RESULTS", "../results")
+
 def shift_lowfps(num_gpus = 1, shift_dur = 4.2):
   total_dur = 10.1
   fps = 29.97
@@ -188,7 +192,7 @@ def cam_v1(num_gpus = 1, shift_dur = 4.2):
               grad_clip = 5.,
               skip_notfound = False,
               augment_ims = True,
-              init_path = '../results/nets/shift/net.tf-650000',
+              init_path = pj(results_root(), 'nets', 'shift', 'net.tf-650000'),
               cam = True,
               batch_size = int(5*num_gpus),
               test_batch = 10,

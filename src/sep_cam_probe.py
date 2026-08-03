@@ -438,10 +438,13 @@ def main():
     else:
         check_vid_dur(arg.vid_dur)
         pr = getattr(sep_params, arg.model)(vid_dur=arg.vid_dur)
-    # sep_video.main() sets these outside sep_params; silently missing if you
-    # build params directly.
-    pr.input_rms = np.sqrt(0.1**2 + 0.1**2)
-    pr.model_path = "../results/nets/sep/%s/net.tf-%d" % (pr.name, pr.train_iters)
+    # input_rms is set by sep_params itself now; the guard covers older
+    # param sets. model_path honors MULTISENSORY_RESULTS like the rest.
+    if not hasattr(pr, "input_rms"):
+        pr.input_rms = np.sqrt(0.1**2 + 0.1**2)
+    pr.model_path = os.path.join(
+        sep_params.results_root(), "nets", "sep", pr.name, "net.tf-%d" % pr.train_iters
+    )
 
     if arg.cam_hires:
         pr.cam = True

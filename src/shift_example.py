@@ -5,7 +5,7 @@ import shift_net, aolib.sound as sound, aolib.img as ig, aolib.util as ut, sep_v
 # visualization of the CAM.
 
 pr = shift_params.shift_v1()
-model_file = "../results/nets/shift/net.tf-650000"
+model_file = shift_params.pj(shift_params.results_root(), "nets", "shift", "net.tf-650000")
 gpu = None
 
 # uncomment for higher-resolution CAM (like the ones in the paper)

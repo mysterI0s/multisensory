@@ -1,5 +1,8 @@
 # Separate on- and off-screen sound from video file. See README for usage examples.
-import aolib.util as ut, aolib.img as ig, os, numpy as np, tensorflow.compat.v1 as tf, tfutil as mu, scipy.io, sys, aolib.imtable as imtable, pylab, argparse, shift_params, shift_net
+# NOTE: pylab (matplotlib) and aolib.imtable are NOT imported at module level —
+# the streaming server imports this file and must not pull in a plotting stack.
+# The offline __main__ table view imports imtable lazily where it is used.
+import aolib.util as ut, aolib.img as ig, os, numpy as np, tensorflow.compat.v1 as tf, tfutil as mu, scipy.io, sys, argparse, shift_params, shift_net
 
 tf.disable_v2_behavior()
 import sourcesep, sep_params
@@ -66,8 +69,10 @@ class NetClf:
             print("Running on:", self.gpu)
             with tf.device(self.gpu):
                 if reset:
+                    # reset_default_graph() is sufficient; the previous extra
+                    # `tf.Graph().as_default()` was a no-op without a `with`
+                    # block and only suggested an isolation that did not exist.
                     tf.reset_default_graph()
-                    tf.Graph().as_default()
                 pr = self.pr
                 self.sess = tf.Session(config=_session_config())
                 self.ims_ph = tf.placeholder(
@@ -243,135 +248,9 @@ class NetClf:
             auto1=auto1[0],
         )
 
-    # def predict_cam(self, ims, samples, n = 3, num_times = 3):
-    def predict_cam(self, ims, samples, n=5, num_times=3):
-        # num_times = 1
-        if 1:
-            f = min(ims.shape[1:3])
-            ims = np.array([ig.resize(im, (f, f)) for im in ims])
-            d = int(224.0 / 256 * ims.shape[1])
-            print("d =", d, ims.shape)
-            full = None
-            count = None
-            if n == 1:
-                ys = [ims.shape[1] / 2]
-                xs = [ims.shape[2] / 2]
-            else:
-                ys = np.linspace(0, ims.shape[1] - d, n).astype("int64")
-                xs = np.linspace(0, ims.shape[2] - d, n).astype("int64")
-
-            if num_times == 1:
-                print("Using one time")
-                ts = [0.0]
-            else:
-                ts = np.linspace(-2, 2.0, n)
-
-            for y in ys:
-                for x in xs:
-                    crop = ims[:, y : y + d, x : x + d]
-                    crop = resize_nd(
-                        crop,
-                        (crop.shape[0], pr.crop_im_dim, pr.crop_im_dim, 3),
-                        order=1,
-                    )
-                    for shift in ts:
-                        print(x, y, t)
-                        snd = sound.Sound(samples, self.pr.samp_sr)
-                        s0 = int(shift * snd.rate)
-                        s1 = s0 + snd.samples.shape[0]
-                        shifted = snd.pad_slice(s0, s1)
-                        assert shifted.samples.shape[0] == snd.samples.shape[0]
-
-                        [cam] = self.sess.run(
-                            [self.net.vid_net.cam],
-                            {
-                                self.ims_ph: crop[None],
-                                self.samples_ph: shifted.samples[None],
-                            },
-                        )
-                        cam = cam[0, ..., 0]
-                        if full is None:
-                            full = np.zeros(cam.shape[:1] + ims.shape[1:3])
-                            count = np.zeros_like(full)
-                        cam_resized = scipy.ndimage.zoom(
-                            cam,
-                            np.array((full.shape[0], d, d), "float32")
-                            / np.array(cam.shape, "float32"),
-                        )
-                        if 1:
-                            print("abs")
-                            cam_resized = np.abs(cam_resized)
-                        # print np.abs(cam_resized).max()
-
-                        frame0 = int(max(-shift, 0) * self.pr.fps)
-                        frame1 = cam_resized.shape[0] - int(max(shift, 0) * self.pr.fps)
-                        ok = np.ones(count.shape[0])
-                        cam_resized[:frame0] = 0.0
-                        cam_resized[frame1:] = 0.0
-                        ok[:frame0] = 0
-                        ok[frame1:] = 0
-
-                        full[:, y : y + d, x : x + d] += cam_resized
-                        count[:, y : y + d, x : x + d] += ok[:, None, None]
-            assert count.min() > 0
-            full /= np.maximum(count, 1e-5)
-        #   ut.save('../results/full.pk', full)
-        # full = ut.load('../results/full.pk')
-        return full
-
-
-def resize_nd(im, scale, order=3):
-    if np.ndim(scale) == 0:
-        new_scale = [scale] * len(im.shape)
-    elif type(scale[0]) == type(0):
-        dims = scale
-        new_scale = (np.array(dims, "d") + 0.4) / np.array(im.shape, "d")
-        # a test to make sure we set the floating point scale correctly
-        result_dims = map(int, new_scale * np.array(im.shape, "d"))
-        assert tuple(result_dims) == tuple(dims)
-        scale_param = new_scale
-    elif type(scale[0]) == type(0.0) and type(scale[1]) == type(0.0):
-        new_scale = scale
-    else:
-        raise RuntimeError("don't know how to interpret scale: %s" % (scale,))
-    res = scipy.ndimage.zoom(im, scale_param, order=order)
-    # verify that zoom() returned an image of the desired size
-    if (np.ndim(scale) != 0) and type(scale[0]) == type(0):
-        assert res.shape == scale
-    return res
-
-
-def heatmap(frames, cam, lo_frac=0.5, adapt=True, max_val=35):
-    """Set heatmap threshold adaptively, to deal with large variation in possible input videos."""
-    frames = np.asarray(frames)
-    max_prob = 0.35
-    if adapt:
-        max_val = np.percentile(cam, 97)
-
-    same = np.max(cam) - np.min(cam) <= 0.001
-    if same:
-        return frames
-
-    outs = []
-    for i in range(frames.shape[0]):
-        lo = lo_frac * max_val
-        hi = max_val + 0.001
-        im = frames[i]
-        f = cam.shape[0] * float(i) / frames.shape[0]
-        l = int(f)
-        r = min(1 + l, cam.shape[0] - 1)
-        p = f - l
-        frame_cam = ((1 - p) * cam[l]) + (p * cam[r])
-        frame_cam = ig.resize(frame_cam, im.shape[:2], 1)
-        # vis = ut.cmap_im(pylab.cm.hot, np.minimum(frame_cam, hi), lo = lo, hi = hi)
-        vis = ut.cmap_im(pylab.cm.jet, frame_cam, lo=lo, hi=hi)
-        # p = np.clip((frame_cam - lo)/float(hi - lo), 0, 1.)
-        p = np.clip((frame_cam - lo) / float(hi - lo), 0, max_prob)
-        p = p[..., None]
-        im = np.array(im, "d")
-        vis = np.array(vis, "d")
-        outs.append(np.uint8(im * (1 - p) + vis * p))
-    return np.array(outs)
+    # The dead predict_cam() sliding-crop method (undefined `pr`/`t`, missing
+    # scipy.ndimage import) was removed, along with its resize_nd/heatmap
+    # helpers — the streaming path gets its CAM from predict_with_cam().
 
 
 def crop_from_cam(ims, cam, pr):
@@ -398,16 +277,10 @@ def crop_from_cam(ims, cam, pr):
     return crop
 
 
-def find_cam(ims, samples, arg):
-    clf = shift_net.NetClf(
-        shift_params.cam_v1(shift_dur=(0.5 + len(ims)) / float(pr.fps)),
-        "../results/nets/cam/net.tf-675000",
-        gpu=arg.gpu,
-    )
-    [cam] = clf.predict_cam_resize(ims[None], samples[None])
-    cam = np.abs(cam[0, :, :, :, 0])
-    vis = heatmap(ims, cam, adapt=arg.adapt_cam_thresh, max_val=arg.max_cam_thresh)
-    return cam, vis
+# find_cam() is gone with the cam_v1 fallback path it belonged to: it
+# referenced an undefined `pr`, hard-coded the net.tf-675000 checkpoint, and
+# duplicated what predict_with_cam() now does in the same forward pass as
+# separation. Use sep_cam_probe.py for offline CAM inspection.
 
 
 def run(vid_file, start_time, dur, pr, gpu, buf=0.05, mask=None, arg=None, net=None):
@@ -512,12 +385,15 @@ def run(vid_file, start_time, dur, pr, gpu, buf=0.05, mask=None, arg=None, net=N
         spec_mix = ret["spec_mix"][0]
 
         if arg.cam:
-            cam, vis = find_cam(fulls, samples_orig, arg)
+            raise RuntimeError(
+                "--cam (the cam_v1 fallback path) was removed; use "
+                "sep_cam_probe.py, which fetches the CAM from the separation "
+                "net itself in one forward pass."
+            )
+        if arg.fullres:
+            vis = fulls
         else:
-            if arg.fullres:
-                vis = fulls
-            else:
-                vis = ims
+            vis = ims
 
         return dict(
             ims=vis,
@@ -599,9 +475,15 @@ if __name__ == "__main__":
 
     if arg.clip_dur is None:
         arg.clip_dur = pr.vid_dur
-    pr.input_rms = np.sqrt(0.1**2 + 0.1**2)
+    # input_rms now comes from sep_params itself; kept here only as a guard
+    # for older param sets built without it.
+    if not hasattr(pr, "input_rms"):
+        pr.input_rms = np.sqrt(0.1**2 + 0.1**2)
     print("Spectrogram samples:", pr.spec_len)
-    pr.model_path = "../results/nets/sep/%s/net.tf-%d" % (pr.name, pr.train_iters)
+    pr.model_path = pj(
+        sep_params.results_root(), "nets", "sep", "%s" % pr.name,
+        "net.tf-%d" % pr.train_iters,
+    )
 
     if not os.path.exists(arg.vid_file):
         print("Does not exist:", arg.vid_file)
@@ -655,6 +537,8 @@ if __name__ == "__main__":
     full_samples_bg = np.clip(full_samples_bg, -1.0, 1.0)
     full_samples_src = np.clip(full_samples_src, -1.0, 1.0)
     full_ims = [x for x in full_ims if x is not None]
+    import aolib.imtable as imtable  # lazy: pulls in a display stack the server must not load
+
     table = [
         ["start =", arg.start],
         "fg:",
