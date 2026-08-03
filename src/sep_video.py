@@ -8,6 +8,51 @@ from aolib.sound import Sound
 
 pj = ut.pjoin
 
+# Cap the workspace cuDNN may consider when autotuning convolution
+# algorithms.  Measured on a 6 GB GTX 1660 Ti with the 2.135 s window:
+#
+#   limit      steady median   TF peak VRAM   free for another model
+#   (default)      147.3 ms       2884 MiB          1243 MiB
+#   512 MB         147.8 ms       1029 MiB          4278 MiB
+#   128 MB         149.8 ms        887 MiB          4301 MiB
+#
+# Uncapped, cuDNN probes multi-gigabyte workspaces and the BFC allocator
+# grows its pool to match, then never releases it -- 2.9 GB held for a
+# 477 MB working set.  Capping at 512 MB costs no measurable latency and
+# returns ~3 GB, which is what lets a second model stay resident on the
+# same card.  Override by setting this variable before import.
+os.environ.setdefault("TF_CUDNN_WORKSPACE_LIMIT_IN_MB", "512")
+
+
+def _session_config():
+    """Build a tf.ConfigProto for the inference session.
+
+    Controlled by environment variables so nothing here has to change when
+    this model shares a GPU with another framework.
+
+    MS_GPU_ALLOW_GROWTH  default "1".  Grow the VRAM allocation on demand
+                         instead of claiming the whole card when the
+                         session is created.  Set to "0" for the old
+                         grab-everything behaviour.
+    MS_GPU_MEM_FRACTION  optional float in (0, 1].  Hard ceiling on the
+                         fraction of total VRAM this process may use.
+                         Use when a second framework needs a guaranteed
+                         share of the same card.
+    MS_GPU_LOG           set to "1" to print the resulting configuration.
+    """
+    config = tf.ConfigProto()
+    grow = os.environ.get("MS_GPU_ALLOW_GROWTH", "1")
+    config.gpu_options.allow_growth = grow not in ("0", "false", "False", "")
+    frac = os.environ.get("MS_GPU_MEM_FRACTION", "").strip()
+    if frac:
+        config.gpu_options.per_process_gpu_memory_fraction = float(frac)
+    if os.environ.get("MS_GPU_LOG", "") == "1":
+        print(
+            "session config: allow_growth=%s mem_fraction=%s"
+            % (config.gpu_options.allow_growth, frac if frac else "(none)")
+        )
+    return config
+
 
 class NetClf:
     def __init__(self, pr, sess=None, gpu=None, restore_only_shift=False):
@@ -24,7 +69,7 @@ class NetClf:
                     tf.reset_default_graph()
                     tf.Graph().as_default()
                 pr = self.pr
-                self.sess = tf.Session()
+                self.sess = tf.Session(config=_session_config())
                 self.ims_ph = tf.placeholder(
                     tf.uint8, [1, pr.sampled_frames, pr.crop_im_dim, pr.crop_im_dim, 3]
                 )
@@ -57,6 +102,21 @@ class NetClf:
                 self.spec_pred_bg = self.net.pred_spec_bg
                 self.samples_pred_fg = self.net.pred_wav_fg
                 self.samples_pred_bg = self.net.pred_wav_bg
+
+                # ---- CAM tap ------------------------------------------------
+                # shift_net.make_net() ALWAYS builds a `cam` tensor: a 1x1x1
+                # conv over `last_conv` sharing weights with joint/logits
+                # (scope=logits_name, reuse=True).  It is NOT gated on pr.cam.
+                # pr.cam only selects the spatial stride of im/conv5_1
+                # (s = 1 if pr.cam else 2), so with the stock separation params
+                # (cam=False) this tensor still exists -- just at half spatial
+                # resolution.  sourcesep.make_net re-exports the video trunk
+                # struct as `.vid_net`, so it is reachable from here.
+                #
+                # Must be created BEFORE graph.finalize() below.
+                # None when pr.net_style == 'no-im' (no video trunk at all).
+                vid_net = getattr(self.net, "vid_net", None)
+                self.cam_op = None if vid_net is None else getattr(vid_net, "cam", None)
 
                 print("Restoring from:", pr.model_path)
                 if self.restore_only_shift:
@@ -98,6 +158,58 @@ class NetClf:
             spec_pred_bg=spec_pred_bg,
             samples_mix=samples,
             spec_mix=spec_mix,
+        )
+
+    def predict_with_cam(self, ims, samples):
+        """Separation + localization CAM from a SINGLE forward pass.
+
+        Returns the same dict as predict(), plus:
+            cam : [T', H', W'] float32, or None if no video trunk.
+
+        The CAM is close to free: it is a 1x1x1 convolution on `last_conv`,
+        which the separation path already computes.  One extra fetch, not an
+        extra forward pass.
+
+        Spatial resolution depends on pr.cam:
+            pr.cam is False (stock) -> H' = W' = crop_im_dim / 32  (7 for 224)
+            pr.cam is True          -> H' = W' = crop_im_dim / 16 (14 for 224)
+
+        Setting pr.cam = True does not change any shape the u-net sees, because
+        sourcesep.merge_level() does reduce_mean(scales[n], [2, 3]) -- it pools
+        the trunk over its spatial axes before concatenating into the u-net.
+        Conv weights are shared across strides, so the checkpoint still loads.
+        Separation output will shift slightly (same kernels averaged over a
+        14x14 grid instead of 7x7), so A/B it rather than assuming equivalence.
+
+        This also folds in the `specgram_op` fetch that predict() runs as a
+        separate sess.run, so a cycle is one round trip instead of two and the
+        STFT is computed once instead of twice.
+        """
+        fetches = [
+            self.spec_pred_fg,
+            self.spec_pred_bg,
+            self.samples_pred_fg,
+            self.samples_pred_bg,
+            self.specgram_op,
+        ]
+        want_cam = self.cam_op is not None
+        if want_cam:
+            fetches.append(self.cam_op)
+
+        out = self.sess.run(fetches, {self.ims_ph: ims, self.samples_ph: samples})
+        spec_pred_fg, spec_pred_bg, samples_pred_fg, samples_pred_bg, spec_mix = out[:5]
+
+        # cam is [B, T', H', W', 1] -> drop batch and the singleton channel.
+        cam = out[5][0, ..., 0] if want_cam else None
+
+        return dict(
+            samples_pred_fg=samples_pred_fg,
+            samples_pred_bg=samples_pred_bg,
+            spec_pred_fg=spec_pred_fg,
+            spec_pred_bg=spec_pred_bg,
+            samples_mix=samples,
+            spec_mix=spec_mix,
+            cam=cam,
         )
 
     def predict_unmixed(self, ims, samples0, samples1):
@@ -375,13 +487,15 @@ def run(vid_file, start_time, dur, pr, gpu, buf=0.05, mask=None, arg=None, net=N
         ims = ims[: pr.sampled_frames]
 
         if mask == "l":
-            ims[:, :, : ims.shape[2] / 2] = 128
+            # NOTE: `/ 2` here produced a float index and raised TypeError on
+            # Python 3, making mask='l'/'r' unusable.  Integer division.
+            ims[:, :, : ims.shape[2] // 2] = 128
             if arg.fullres:
-                fulls[:, :, : fulls.shape[2] / 2] = 128
+                fulls[:, :, : fulls.shape[2] // 2] = 128
         elif mask == "r":
-            ims[:, :, ims.shape[2] / 2 :] = 128
+            ims[:, :, ims.shape[2] // 2 :] = 128
             if arg.fullres:
-                fulls[:, :, fulls.shape[2] / 2 :] = 128
+                fulls[:, :, fulls.shape[2] // 2 :] = 128
         elif mask is None:
             pass
         else:
