@@ -1,8 +1,21 @@
-import wave, os, numpy as np, pylab as pl, copy
+import wave, os, numpy as np, copy
 import scipy.io.wavfile
 from . import util as ut
 from . import img as ig
 from . import imtable
+
+
+class _LazyPylab:
+    """Deferred matplotlib import — see aolib.util. Only the offline
+    spectrogram/waveform plotting helpers below need it."""
+
+    def __getattr__(self, name):
+        import pylab as _pylab
+
+        return getattr(_pylab, name)
+
+
+pl = _LazyPylab()
 
 
 class converted_wav:

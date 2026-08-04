@@ -1,5 +1,5 @@
 import numpy as np, sys, datetime, tempfile, glob
-import tempfile, webbrowser, os, pylab, random
+import tempfile, webbrowser, os, random  # (pylab was imported here but never used)
 
 # import util as ut, img as ig
 from . import util as ut

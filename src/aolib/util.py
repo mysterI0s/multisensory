@@ -1,10 +1,25 @@
-import time, random, math, numpy, os, sys, tempfile, pylab, subprocess, matplotlib, datetime, itertools as itl, copy, pickle as pickle, gc, collections, bisect, traceback, multiprocessing
+import time, random, math, numpy, os, sys, tempfile, subprocess, datetime, itertools as itl, copy, pickle as pickle, gc, collections, bisect, traceback, multiprocessing
 import numpy as np
 from . import img as ig
 import scipy.sparse
 import inspect
 import glob as _glob
 from io import StringIO
+
+
+class _LazyPylab:
+    """Defers the matplotlib import to first use. The streaming server
+    imports this module for its utility functions and must not drag in a
+    plotting stack (matplotlib is not even installed there); only the
+    offline visualization helpers below actually need pylab."""
+
+    def __getattr__(self, name):
+        import pylab as _pylab
+
+        return getattr(_pylab, name)
+
+
+pylab = _LazyPylab()
 
 # import networkx as nx
 # graph = nx
@@ -3466,7 +3481,11 @@ def imagesc(im, lo=None, hi=None, cmap=None):
     return ig.from_fig()
 
 
-def apply_cmap(im, cmap=pylab.cm.jet, lo=None, hi=None):
+def apply_cmap(im, cmap=None, lo=None, hi=None):
+    # Default resolved at call time: a pylab default argument would trigger
+    # the matplotlib import when this module loads.
+    if cmap is None:
+        cmap = pylab.cm.jet
     return cmap(clip_rescale(im, lo, hi).flatten()).reshape(im.shape[:2] + (-1,))[
         :, :, :3
     ]

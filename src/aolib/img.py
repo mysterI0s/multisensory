@@ -5,8 +5,19 @@ import itertools as itl
 from PIL import Image, ImageDraw, ImageFont
 from . import util as ut  # Assumes util.py is in the same directory
 import scipy.ndimage
-import matplotlib.pylab as pylab
 import webbrowser
+
+
+class _LazyPylab:
+    """Deferred matplotlib import — see aolib.util. Only from_fig() needs it."""
+
+    def __getattr__(self, name):
+        import matplotlib.pylab as _pylab
+
+        return getattr(_pylab, name)
+
+
+pylab = _LazyPylab()
 
 # Handle Pillow version compatibility for Resampling
 try:
