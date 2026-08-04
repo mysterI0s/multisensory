@@ -146,3 +146,39 @@ Build synthetic mixtures from disjoint-speaker VoxCeleb pairs (the paper's
 
 The middle row is the whole reason to do this. A migration that runs is not a
 migration that works, and `py_compile` cannot tell the two apart.
+
+---
+
+# SonicSight server integration
+
+This repo is also imported directly by the SonicSight backend
+(`SonicSightBackend/src/engines/multisensory_engine.py` adds `src/` to its
+path). What the server relies on:
+
+- `sep_params.full()` — the LOCKED 2.135 s window (`num_samples` 44144 @ 21000 Hz,
+  63 frames, `spec_len` 128) and `input_rms`, which now lives in the params.
+- `sep_video.NetClf.predict_with_cam()` — separation + the 7×7 alignment CAM in
+  one `sess.run`. The CAM postprocess on the server side reproduces
+  `cam_analyze.reduce_positive` exactly so live output stays comparable to the
+  probe tooling.
+- `sep_video` module-level defaults: `TF_CUDNN_WORKSPACE_LIMIT_IN_MB=512`
+  (do not remove — uncapped, the allocator holds ~2.9 GB for a ~0.5 GB working
+  set) and `_session_config()` reading `MS_GPU_ALLOW_GROWTH` /
+  `MS_GPU_MEM_FRACTION`, which is what lets TF share a 6 GB card with PyTorch.
+- `MULTISENSORY_RESULTS` (default `../results`) points every checkpoint path;
+  the server passes an absolute `model_path` explicitly.
+- `sep_video` no longer imports `pylab`/`aolib.imtable` at module level, so the
+  server does not drag in a plotting stack. The dead `predict_cam`/`find_cam`
+  (cam_v1) paths were removed; use `sep_cam_probe.py` for offline CAM work.
+
+**Hard-won rules — do not deviate** (evidence in the project handoff):
+`vid_dur` stays 2.135 (4.27 flipped the decisive mask test from PASS +0.8248 to
+a plausible-looking FAIL on the identical clip); `pr.cam` stays False (the
+14×14 CAM correlates 0.0684 with the validated 7×7); the multisensory streaming
+hop is 250 ms (inference is 142–148 ms; a 125 ms hop compounds lag).
+
+The evidence base (`t0_smoke.sh`, `t1`–`t4`, `Dockerfile.tf18`,
+`src/sep_cam_probe.py`, `src/cam_analyze.py`, `src/gpu_doctor.py`) is how we
+prove the model still works — it is not clutter. `multisensory_pytorch/` is an
+unvalidated port skeleton with no checkpoint; the server deliberately uses the
+TF path that carries the measurement record.
